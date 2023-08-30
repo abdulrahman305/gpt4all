@@ -21,15 +21,6 @@ MySettingsTab {
         property alias collection: collection.text
         property alias folder_path: folderEdit.text
 
-        FolderDialog {
-            id: folderDialog
-            title: "Please choose a directory"
-            currentFolder: StandardPaths.writableLocation(StandardPaths.HomeLocation)
-            onAccepted: {
-                root.folder_path = selectedFolder
-            }
-        }
-
         Item {
             Layout.fillWidth: true
             height: row.height
@@ -44,6 +35,7 @@ MySettingsTab {
                     width: 225
                     horizontalAlignment: Text.AlignJustify
                     color: theme.textColor
+                    font.pixelSize: theme.fontSizeLarge
                     placeholderText: qsTr("Collection name...")
                     placeholderTextColor: theme.mutedTextColor
                     ToolTip.text: qsTr("Name of the collection to add (Required)")
@@ -64,6 +56,7 @@ MySettingsTab {
                     Layout.fillWidth: true
                     text: root.folder_path
                     placeholderText: qsTr("Folder path...")
+                    font.pixelSize: theme.fontSizeLarge
                     placeholderTextColor: theme.mutedTextColor
                     ToolTip.text: qsTr("Folder path to documents (Required)")
                     ToolTip.visible: hovered
@@ -79,7 +72,9 @@ MySettingsTab {
                     id: browseButton
                     text: qsTr("Browse")
                     onClicked: {
-                        folderDialog.open();
+                        openFolderDialog(StandardPaths.writableLocation(StandardPaths.HomeLocation), function(selectedFolder) {
+                            root.folder_path = selectedFolder
+                        })
                     }
                 }
 
@@ -129,6 +124,7 @@ MySettingsTab {
                         text: collection
                         elide: Text.ElideRight
                         color: theme.textColor
+                        font.pixelSize: theme.fontSizeLarge
                         width: 200
                     }
 
@@ -141,6 +137,7 @@ MySettingsTab {
                         text: folder_path
                         elide: Text.ElideRight
                         color: theme.textColor
+                        font.pixelSize: theme.fontSizeLarge
                     }
 
                     Item {
@@ -175,6 +172,7 @@ MySettingsTab {
                 id: showReferencesLabel
                 text: qsTr("Show references:")
                 color: theme.textColor
+                font.pixelSize: theme.fontSizeLarge
             }
             MyCheckBox {
                 id: showReferencesBox
@@ -213,6 +211,7 @@ MySettingsTab {
             Layout.row: 1
             Layout.column: 0
             color: theme.textColor
+            font.pixelSize: theme.fontSizeLarge
             text: qsTr("Document snippet size (characters):")
         }
 
@@ -242,6 +241,7 @@ MySettingsTab {
             Layout.row: 2
             Layout.column: 0
             color: theme.textColor
+            font.pixelSize: theme.fontSizeLarge
             text: qsTr("Document snippets per prompt:")
         }
 

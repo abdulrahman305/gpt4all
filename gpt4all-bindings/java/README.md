@@ -12,12 +12,12 @@ You can add Java bindings into your Java project by adding the following depende
 <dependency>
     <groupId>com.hexadevlabs</groupId>
     <artifactId>gpt4all-java-binding</artifactId>
-    <version>1.1.3</version>
+    <version>1.1.5</version>
 </dependency>
 ```
 **Gradle**
 ```
-implementation 'com.hexadevlabs:gpt4all-java-binding:1.1.3'
+implementation 'com.hexadevlabs:gpt4all-java-binding:1.1.5'
 ```
 
 To add the library dependency for another build system see [Maven Central Java bindings](https://central.sonatype.com/artifact/com.hexadevlabs/gpt4all-java-binding/).
@@ -118,4 +118,9 @@ If this is the case you can easily download and install the latest x64 Microsoft
    - Add static GPT4ALL_VERSION to signify gpt4all version of the bindings
    - Add PromptIsTooLongException for prompts that are longer than context size.
    - Replit model support to include Metal Mac hardware support.
+3. Version **1.1.4**:
+   - Java bindings is compatible with gpt4all version 2.4.11
+   - Falcon model support included.
+4. Version **1.1.5**:
+   - Add a check for model file readability before loading model.
    

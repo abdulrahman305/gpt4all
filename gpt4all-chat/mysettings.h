@@ -15,6 +15,8 @@ class MySettings : public QObject
     Q_PROPERTY(bool serverChat READ serverChat WRITE setServerChat NOTIFY serverChatChanged)
     Q_PROPERTY(QString modelPath READ modelPath WRITE setModelPath NOTIFY modelPathChanged)
     Q_PROPERTY(QString userDefaultModel READ userDefaultModel WRITE setUserDefaultModel NOTIFY userDefaultModelChanged)
+    Q_PROPERTY(QString chatTheme READ chatTheme WRITE setChatTheme NOTIFY chatThemeChanged)
+    Q_PROPERTY(QString fontSize READ fontSize WRITE setFontSize NOTIFY fontSizeChanged)
     Q_PROPERTY(bool forceMetal READ forceMetal WRITE setForceMetal NOTIFY forceMetalChanged)
     Q_PROPERTY(QString lastVersionStarted READ lastVersionStarted WRITE setLastVersionStarted NOTIFY lastVersionStartedChanged)
     Q_PROPERTY(int localDocsChunkSize READ localDocsChunkSize WRITE setLocalDocsChunkSize NOTIFY localDocsChunkSizeChanged)
@@ -70,6 +72,10 @@ public:
     void setModelPath(const QString &p);
     QString userDefaultModel() const;
     void setUserDefaultModel(const QString &u);
+    QString chatTheme() const;
+    void setChatTheme(const QString &u);
+    QString fontSize() const;
+    void setFontSize(const QString &u);
     bool forceMetal() const;
     void setForceMetal(bool b);
 
@@ -93,6 +99,9 @@ public:
     bool networkUsageStatsActive() const;
     void setNetworkUsageStatsActive(bool b);
 
+    QString attemptModelLoad() const;
+    void setAttemptModelLoad(const QString &modelFile);
+
 Q_SIGNALS:
     void nameChanged(const ModelInfo &model);
     void filenameChanged(const ModelInfo &model);
@@ -111,6 +120,8 @@ Q_SIGNALS:
     void serverChatChanged();
     void modelPathChanged();
     void userDefaultModelChanged();
+    void chatThemeChanged();
+    void fontSizeChanged();
     void forceMetalChanged(bool);
     void lastVersionStartedChanged();
     void localDocsChunkSizeChanged();
@@ -119,6 +130,7 @@ Q_SIGNALS:
     void networkAttributionChanged();
     void networkIsActiveChanged();
     void networkUsageStatsActiveChanged();
+    void attemptModelLoadChanged();
 
 private:
     bool m_forceMetal;

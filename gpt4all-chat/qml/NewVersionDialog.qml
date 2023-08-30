@@ -13,7 +13,8 @@ MyDialog {
     modal: true
     width: contentItem.width
     height: contentItem.height
-    padding: 10
+    padding: 20
+    closeButtonVisible: false
 
     Theme {
         id: theme
@@ -32,6 +33,7 @@ MyDialog {
             bottomPadding: 20
             text: qsTr("New version is available:")
             color: theme.textColor
+            font.pixelSize: theme.fontSizeLarge
         }
 
         MyButton {
@@ -41,6 +43,7 @@ MyDialog {
             anchors.verticalCenter: label.verticalCenter
             padding: 20
             text: qsTr("Update")
+            font.pixelSize: theme.fontSizeLarge
             Accessible.description: qsTr("Update to new version")
             onClicked: {
                 if (!LLM.checkForUpdates())

@@ -117,8 +117,10 @@ public  class LLModel implements AutoCloseable {
 
     /**
      * This may be set before any Model instance classes are instantiated to
-     * set where the model may be found. This may be needed if setting
-     * library search path by standard means is not available.
+     * set where the native shared libraries are to be found.
+     * <p>
+     * This may be needed if setting library search path by standard means is not available
+     * or the libraries loaded from the temp folder bundled with the binding jar is not desirable.
      */
     public static String LIBRARY_SEARCH_PATH;
 
@@ -138,7 +140,7 @@ public  class LLModel implements AutoCloseable {
      * GPT4ALL native libraries. The binding may work for older
      * versions but that is not guaranteed.
      */
-    public static final String GPT4ALL_VERSION = "2.4.8";
+    public static final String GPT4ALL_VERSION = "2.4.11";
 
     protected static LLModelLibrary library;
 
@@ -182,11 +184,16 @@ public  class LLModel implements AutoCloseable {
             throw new IllegalStateException("Model file does not exist: " + modelPathAbs);
         }
 
+        // Check if file is Readable
+        if(!Files.isReadable(modelPath)){
+            throw new IllegalStateException("Model file cannot be read: " + modelPathAbs);
+        }
+
         // Create Model Struct. Will load dynamically the correct backend based on model type
         model = library.llmodel_model_create2(modelPathAbs, "auto", error);
 
         if(model == null) {
-            throw new IllegalStateException("Could not load gpt4all backend :" + error.message);
+            throw new IllegalStateException("Could not load, gpt4all backend returned error: " + error.message);
         }
         library.llmodel_loadModel(model, modelPathAbs);
 

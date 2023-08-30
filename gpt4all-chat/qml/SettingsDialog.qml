@@ -69,13 +69,15 @@ MyDialog {
                     anchors.margins: 20
                     font.bold: index == listView.currentIndex
                     text: title
+                    font.pixelSize: theme.fontSizeLarge
                     elide: Text.ElideRight
                     color: theme.textColor
                     width: 200
-                    TapHandler {
-                        onTapped: {
-                            listView.currentIndex = index
-                        }
+                }
+
+                TapHandler {
+                    onTapped: {
+                        listView.currentIndex = index
                     }
                 }
             }

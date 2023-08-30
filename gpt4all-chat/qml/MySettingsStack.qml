@@ -3,6 +3,8 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
+import QtQuick.Dialogs
+import Qt.labs.folderlistmodel
 import mysettings
 
 Item {
@@ -54,6 +56,7 @@ Item {
                 padding: 10
                 contentItem: IconLabel {
                     color: theme.textColor
+                    font.pixelSize: theme.fontSizeLarge
                     font.bold: tabButton.checked
                     text: model.title
                 }
@@ -91,6 +94,17 @@ Item {
         border.color: theme.tabBorder
     }
 
+    FolderDialog {
+        id: folderDialog
+        title: qsTr("Please choose a directory")
+    }
+
+    function openFolderDialog(currentFolder, onAccepted) {
+        folderDialog.currentFolder = currentFolder;
+        folderDialog.accepted.connect(function() { onAccepted(folderDialog.currentFolder); });
+        folderDialog.open();
+    }
+
     StackLayout {
         id: stackLayout
         anchors.top: tabTitlesModel.count > 1 ? dividerTabBar.bottom : titleLabel.bottom
@@ -106,6 +120,7 @@ Item {
                 sourceComponent: model.modelData
                 onLoaded: {
                     settingsStack.tabTitlesModel.append({ "title": loader.item.title });
+                    item.openFolderDialog = settingsStack.openFolderDialog;
                 }
             }
         }
