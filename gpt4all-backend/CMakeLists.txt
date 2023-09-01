@@ -20,7 +20,7 @@ endif()
 include_directories("${CMAKE_CURRENT_BINARY_DIR}")
 
 set(LLMODEL_VERSION_MAJOR 0)
-set(LLMODEL_VERSION_MINOR 3)
+set(LLMODEL_VERSION_MINOR 4)
 set(LLMODEL_VERSION_PATCH 0)
 set(LLMODEL_VERSION "${LLMODEL_VERSION_MAJOR}.${LLMODEL_VERSION_MINOR}.${LLMODEL_VERSION_PATCH}")
 project(llmodel VERSION ${LLMODEL_VERSION} LANGUAGES CXX C)
@@ -37,6 +37,10 @@ if (NOT IPO_SUPPORTED)
     message(WARNING "Interprocedural optimization is not supported by your toolchain! This will lead to bigger file sizes and worse performance: ${IPO_ERROR}")
 else()
     message(STATUS "Interprocedural optimization support detected")
+endif()
+
+if(NOT APPLE)
+  set(LLAMA_KOMPUTE YES)
 endif()
 
 include(llama.cpp.cmake)
@@ -69,11 +73,6 @@ foreach(BUILD_VARIANT IN LISTS BUILD_VARIANTS)
     # Include GGML
     set(LLAMA_K_QUANTS YES)
     include_ggml(llama.cpp-mainline -mainline-${BUILD_VARIANT} ON)
-    if (NOT LLAMA_METAL)
-        set(LLAMA_K_QUANTS NO)
-        include_ggml(llama.cpp-230511 -230511-${BUILD_VARIANT} ON)
-        include_ggml(llama.cpp-230519 -230519-${BUILD_VARIANT} ON)
-    endif()
 
     # Function for preparing individual implementations
     function(prepare_target TARGET_NAME BASE_LIB)
@@ -100,38 +99,32 @@ foreach(BUILD_VARIANT IN LISTS BUILD_VARIANTS)
 
     add_library(replit-mainline-${BUILD_VARIANT} SHARED
     replit.cpp utils.h utils.cpp llmodel_shared.cpp llmodel_shared.h)
+    target_compile_definitions(replit-mainline-${BUILD_VARIANT} PRIVATE LLAMA_VERSIONS=>=3 LLAMA_DATE=999999)
     prepare_target(replit-mainline llama-mainline)
 
     if (NOT LLAMA_METAL)
-        add_library(llamamodel-230519-${BUILD_VARIANT} SHARED
-            llamamodel.cpp llmodel_shared.cpp)
-        target_compile_definitions(llamamodel-230519-${BUILD_VARIANT} PRIVATE
-            LLAMA_VERSIONS===2 LLAMA_DATE=230519)
-        prepare_target(llamamodel-230519 llama-230519)
-        add_library(llamamodel-230511-${BUILD_VARIANT} SHARED
-            llamamodel.cpp llmodel_shared.cpp)
-        target_compile_definitions(llamamodel-230511-${BUILD_VARIANT} PRIVATE
-            LLAMA_VERSIONS=<=1 LLAMA_DATE=230511)
-        prepare_target(llamamodel-230511 llama-230511)
-
-        add_library(gptj-${BUILD_VARIANT} SHARED
-            gptj.cpp utils.h utils.cpp llmodel_shared.cpp llmodel_shared.h)
-        prepare_target(gptj ggml-230511)
+# FIXME: These need to be forward ported to latest ggml
+#        add_library(gptj-${BUILD_VARIANT} SHARED
+#            gptj.cpp utils.h utils.cpp llmodel_shared.cpp llmodel_shared.h)
+#        prepare_target(gptj ggml-230511)
 
         add_library(falcon-${BUILD_VARIANT} SHARED
             falcon.cpp utils.h utils.cpp llmodel_shared.cpp llmodel_shared.h)
+        target_compile_definitions(falcon-${BUILD_VARIANT} PRIVATE LLAMA_VERSIONS=>=3 LLAMA_DATE=999999)
         prepare_target(falcon llama-mainline)
-
-        add_library(mpt-${BUILD_VARIANT} SHARED
-            mpt.cpp utils.h utils.cpp llmodel_shared.cpp llmodel_shared.h)
-        prepare_target(mpt ggml-230511)
+# FIXME: These need to be forward ported to latest ggml
+#        add_library(mpt-${BUILD_VARIANT} SHARED
+#            mpt.cpp utils.h utils.cpp llmodel_shared.cpp llmodel_shared.h)
+#        prepare_target(mpt ggml-230511)
 
         add_library(bert-${BUILD_VARIANT} SHARED
             bert.cpp utils.h utils.cpp llmodel_shared.cpp llmodel_shared.h)
+        target_compile_definitions(bert-${BUILD_VARIANT} PRIVATE LLAMA_VERSIONS=>=3 LLAMA_DATE=999999)
         prepare_target(bert llama-mainline)
 
         add_library(starcoder-${BUILD_VARIANT} SHARED
             starcoder.cpp utils.h utils.cpp llmodel_shared.cpp llmodel_shared.h)
+        target_compile_definitions(starcoder-${BUILD_VARIANT} PRIVATE LLAMA_VERSIONS=>=3 LLAMA_DATE=999999)
         prepare_target(starcoder llama-mainline)
     endif()
 endforeach()
