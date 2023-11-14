@@ -15,12 +15,20 @@ pip install gpt4all
 
 ## Local Build Instructions
 
+### Prerequisites
+
+On Windows and Linux, building GPT4All requires the complete Vulkan SDK. You may download it from here: https://vulkan.lunarg.com/sdk/home
+
+macOS users do not need Vulkan, as GPT4All will use Metal instead.
+
+### Building the python bindings
+
 **NOTE**: If you are doing this on a Windows machine, you must build the GPT4All backend using [MinGW64](https://www.mingw-w64.org/) compiler.
 
 1. Setup `llmodel`
 
 ```
-git clone --recurse-submodules git@github.com:nomic-ai/gpt4all.git
+git clone --recurse-submodules https://github.com/nomic-ai/gpt4all.git
 cd gpt4all/gpt4all-backend/
 mkdir build
 cd build
@@ -42,7 +50,7 @@ Test it out! In a Python script or console:
 
 ```python
 from gpt4all import GPT4All
-model = GPT4All("orca-mini-3b.ggmlv3.q4_0.bin")
+model = GPT4All("orca-mini-3b-gguf2-q4_0.gguf")
 output = model.generate("The capital of France is ", max_tokens=3)
 print(output)
 ```
@@ -51,7 +59,7 @@ print(output)
 GPU Usage
 ```python
 from gpt4all import GPT4All
-model = GPT4All("orca-mini-3b.ggmlv3.q4_0.bin", device='gpu') # device='amd', device='intel'
+model = GPT4All("orca-mini-3b-gguf2-q4_0.gguf", device='gpu') # device='amd', device='intel'
 output = model.generate("The capital of France is ", max_tokens=3)
 print(output)
 ```

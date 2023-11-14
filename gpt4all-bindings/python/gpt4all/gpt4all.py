@@ -1,14 +1,19 @@
 """
 Python only API for running all GPT4All models.
 """
+from __future__ import annotations
+
 import os
+import sys
 import time
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Union
 
 import requests
+from requests.exceptions import ChunkedEncodingError
 from tqdm import tqdm
+from urllib3.exceptions import IncompleteRead, ProtocolError
 
 from . import pyllmodel
 
@@ -29,17 +34,14 @@ class Embed4All:
     Python class that handles embeddings for GPT4All.
     """
 
-    def __init__(
-        self,
-        n_threads: Optional[int] = None,
-    ):
+    def __init__(self, model_name: Optional[str] = None, n_threads: Optional[int] = None, **kwargs):
         """
         Constructor
 
         Args:
             n_threads: number of CPU threads used by GPT4All. Default is None, then the number of threads are determined automatically.
         """
-        self.gpt4all = GPT4All(model_name='ggml-all-MiniLM-L6-v2-f16.bin', n_threads=n_threads)
+        self.gpt4all = GPT4All(model_name or 'all-MiniLM-L6-v2-f16.gguf', n_threads=n_threads, **kwargs)
 
     def embed(self, text: str) -> List[float]:
         """
@@ -62,17 +64,18 @@ class GPT4All:
     def __init__(
         self,
         model_name: str,
-        model_path: Optional[str] = None,
+        model_path: Optional[Union[str, os.PathLike[str]]] = None,
         model_type: Optional[str] = None,
         allow_download: bool = True,
         n_threads: Optional[int] = None,
         device: Optional[str] = "cpu",
+        verbose: bool = False,
     ):
         """
         Constructor
 
         Args:
-            model_name: Name of GPT4All or custom model. Including ".bin" file extension is optional but encouraged.
+            model_name: Name of GPT4All or custom model. Including ".gguf" file extension is optional but encouraged.
             model_path: Path to directory containing model file or, if file does not exist, where to download model.
                 Default is None, in which case models will be stored in `~/.cache/gpt4all/`.
             model_type: Model architecture. This argument currently does not have any functionality and is just used as
@@ -91,7 +94,7 @@ class GPT4All:
         self.model_type = model_type
         self.model = pyllmodel.LLModel()
         # Retrieve model and download if allowed
-        self.config: ConfigType = self.retrieve_model(model_name, model_path=model_path, allow_download=allow_download)
+        self.config: ConfigType = self.retrieve_model(model_name, model_path=model_path, allow_download=allow_download, verbose=verbose)
         if device is not None:
             if device != "cpu":
                 self.model.init_gpu(model_path=self.config["path"], device=device)
@@ -107,19 +110,22 @@ class GPT4All:
     @staticmethod
     def list_models() -> List[ConfigType]:
         """
-        Fetch model list from https://gpt4all.io/models/models.json.
+        Fetch model list from https://gpt4all.io/models/models2.json.
 
         Returns:
             Model list in JSON format.
         """
-        return requests.get("https://gpt4all.io/models/models.json").json()
+        resp = requests.get("https://gpt4all.io/models/models2.json")
+        if resp.status_code != 200:
+            raise ValueError(f'Request failed: HTTP {resp.status_code} {resp.reason}')
+        return resp.json()
 
     @staticmethod
     def retrieve_model(
         model_name: str,
-        model_path: Optional[str] = None,
+        model_path: Optional[Union[str, os.PathLike[str]]] = None,
         allow_download: bool = True,
-        verbose: bool = True,
+        verbose: bool = False,
     ) -> ConfigType:
         """
         Find model file, and if it doesn't exist, download the model.
@@ -135,7 +141,7 @@ class GPT4All:
             Model config.
         """
 
-        model_filename = append_bin_suffix_if_missing(model_name)
+        model_filename = append_extension_if_missing(model_name)
 
         # get the config for the model
         config: ConfigType = DEFAULT_MODEL_CONFIG
@@ -162,7 +168,7 @@ class GPT4All:
                 )
             model_path = DEFAULT_MODEL_DIRECTORY
         else:
-            model_path = model_path.replace("\\", "\\\\")
+            model_path = str(model_path).replace("\\", "\\\\")
 
         if not os.path.exists(model_path):
             raise ValueError(f"Invalid model directory: {model_path}")
@@ -172,7 +178,7 @@ class GPT4All:
             config.pop("url", None)
             config["path"] = model_dest
             if verbose:
-                print("Found model file at ", model_dest)
+                print("Found model file at", model_dest, file=sys.stderr)
 
         # If model file does not exist, download
         elif allow_download:
@@ -187,7 +193,7 @@ class GPT4All:
     @staticmethod
     def download_model(
         model_filename: str,
-        model_path: str,
+        model_path: Union[str, os.PathLike[str]],
         verbose: bool = True,
         url: Optional[str] = None,
     ) -> str:
@@ -195,7 +201,7 @@ class GPT4All:
         Download model from https://gpt4all.io.
 
         Args:
-            model_filename: Filename of model (with .bin extension).
+            model_filename: Filename of model (with .gguf extension).
             model_path: Path to download model to.
             verbose: If True (default), print debug messages.
             url: the models remote url (e.g. may be hosted on HF)
@@ -207,38 +213,67 @@ class GPT4All:
         def get_download_url(model_filename):
             if url:
                 return url
-            return f"https://gpt4all.io/models/{model_filename}"
+            return f"https://gpt4all.io/models/gguf/{model_filename}"
 
         # Download model
         download_path = os.path.join(model_path, model_filename).replace("\\", "\\\\")
         download_url = get_download_url(model_filename)
 
-        response = requests.get(download_url, stream=True)
+        def make_request(offset=None):
+            headers = {}
+            if offset:
+                print(f"\nDownload interrupted, resuming from byte position {offset}", file=sys.stderr)
+                headers['Range'] = f'bytes={offset}-'  # resume incomplete response
+            response = requests.get(download_url, stream=True, headers=headers)
+            if response.status_code not in (200, 206):
+                raise ValueError(f'Request failed: HTTP {response.status_code} {response.reason}')
+            if offset and (response.status_code != 206 or str(offset) not in response.headers.get('Content-Range', '')):
+                raise ValueError('Connection was interrupted and server does not support range requests')
+            return response
+
+        response = make_request()
+
         total_size_in_bytes = int(response.headers.get("content-length", 0))
         block_size = 2**20  # 1 MB
 
-        with tqdm(total=total_size_in_bytes, unit="iB", unit_scale=True) as progress_bar:
+        with open(download_path, "wb") as file, \
+                tqdm(total=total_size_in_bytes, unit="iB", unit_scale=True) as progress_bar:
             try:
-                with open(download_path, "wb") as file:
-                    for data in response.iter_content(block_size):
-                        progress_bar.update(len(data))
-                        file.write(data)
+                while True:
+                    last_progress = progress_bar.n
+                    try:
+                        for data in response.iter_content(block_size):
+                            file.write(data)
+                            progress_bar.update(len(data))
+                    except ChunkedEncodingError as cee:
+                        if cee.args and isinstance(pe := cee.args[0], ProtocolError):
+                            if len(pe.args) >= 2 and isinstance(ir := pe.args[1], IncompleteRead):
+                                assert progress_bar.n <= ir.partial  # urllib3 may be ahead of us but never behind
+                                # the socket was closed during a read - retry
+                                response = make_request(progress_bar.n)
+                                continue
+                        raise
+                    if total_size_in_bytes != 0 and progress_bar.n < total_size_in_bytes:
+                        if progress_bar.n == last_progress:
+                            raise RuntimeError('Download not making progress, aborting.')
+                        # server closed connection prematurely - retry
+                        response = make_request(progress_bar.n)
+                        continue
+                    break
             except Exception:
-                if os.path.exists(download_path):
-                    if verbose:
-                        print("Cleaning up the interrupted download...")
+                if verbose:
+                    print("Cleaning up the interrupted download...", file=sys.stderr)
+                try:
                     os.remove(download_path)
+                except OSError:
+                    pass
                 raise
 
-        # Validate download was successful
-        if total_size_in_bytes != 0 and progress_bar.n != total_size_in_bytes:
-            raise RuntimeError("An error occurred during download. Downloaded file may not work.")
-
-        # Sleep for a little bit so OS can remove file lock
-        time.sleep(2)
+        if os.name == 'nt':
+            time.sleep(2)  # Sleep for a little bit so Windows can remove file lock
 
         if verbose:
-            print("Model downloaded at: ", download_path)
+            print("Model downloaded at:", download_path, file=sys.stderr)
         return download_path
 
     def generate(
@@ -314,7 +349,6 @@ class GPT4All:
             callback: pyllmodel.ResponseCallbackType,
             output_collector: List[MessageType],
         ) -> pyllmodel.ResponseCallbackType:
-
             def _callback(token_id: int, response: str) -> bool:
                 nonlocal callback, output_collector
 
@@ -422,7 +456,7 @@ def empty_chat_session(system_prompt: str = "") -> List[MessageType]:
     return [{"role": "system", "content": system_prompt}]
 
 
-def append_bin_suffix_if_missing(model_name):
-    if not model_name.endswith(".bin"):
-        model_name += ".bin"
+def append_extension_if_missing(model_name):
+    if not model_name.endswith((".bin", ".gguf")):
+        model_name += ".gguf"
     return model_name

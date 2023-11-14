@@ -56,6 +56,8 @@ void Chat::connectLLM()
     connect(m_llmodel, &ChatLLM::recalcChanged, this, &Chat::handleRecalculating, Qt::QueuedConnection);
     connect(m_llmodel, &ChatLLM::generatedNameChanged, this, &Chat::generatedNameChanged, Qt::QueuedConnection);
     connect(m_llmodel, &ChatLLM::reportSpeed, this, &Chat::handleTokenSpeedChanged, Qt::QueuedConnection);
+    connect(m_llmodel, &ChatLLM::reportDevice, this, &Chat::handleDeviceChanged, Qt::QueuedConnection);
+    connect(m_llmodel, &ChatLLM::reportFallbackReason, this, &Chat::handleFallbackReasonChanged, Qt::QueuedConnection);
     connect(m_llmodel, &ChatLLM::databaseResultsChanged, this, &Chat::handleDatabaseResultsChanged, Qt::QueuedConnection);
     connect(m_llmodel, &ChatLLM::modelInfoChanged, this, &Chat::handleModelInfoChanged, Qt::QueuedConnection);
 
@@ -140,17 +142,9 @@ QString Chat::response() const
     return m_response;
 }
 
-QString Chat::responseState() const
+Chat::ResponseState Chat::responseState() const
 {
-    switch (m_responseState) {
-    case ResponseStopped: return QStringLiteral("response stopped");
-    case LocalDocsRetrieval: return QStringLiteral("retrieving ") + m_collections.join(", ");
-    case LocalDocsProcessing: return QStringLiteral("processing ") + m_collections.join(", ");
-    case PromptProcessing: return QStringLiteral("processing");
-    case ResponseGeneration: return QStringLiteral("generating response");
-    };
-    Q_UNREACHABLE();
-    return QString();
+    return m_responseState;
 }
 
 void Chat::handleResponseChanged(const QString &response)
@@ -345,6 +339,18 @@ void Chat::handleTokenSpeedChanged(const QString &tokenSpeed)
     emit tokenSpeedChanged();
 }
 
+void Chat::handleDeviceChanged(const QString &device)
+{
+    m_device = device;
+    emit deviceChanged();
+}
+
+void Chat::handleFallbackReasonChanged(const QString &fallbackReason)
+{
+    m_fallbackReason = fallbackReason;
+    emit fallbackReasonChanged();
+}
+
 void Chat::handleDatabaseResultsChanged(const QList<ResultInfo> &results)
 {
     m_databaseResults = results;
@@ -371,7 +377,11 @@ bool Chat::serialize(QDataStream &stream, int version) const
         stream << m_modelInfo.filename();
     if (version > 2)
         stream << m_collections;
-    if (!m_llmodel->serialize(stream, version))
+
+    const bool serializeKV = MySettings::globalInstance()->saveChatsContext();
+    if (version > 5)
+        stream << serializeKV;
+    if (!m_llmodel->serialize(stream, version, serializeKV))
         return false;
     if (!m_chatModel->serialize(stream, version))
         return false;
@@ -385,34 +395,46 @@ bool Chat::deserialize(QDataStream &stream, int version)
     emit idChanged(m_id);
     stream >> m_name;
     stream >> m_userName;
+    m_generatedName = QLatin1String("nonempty");
     emit nameChanged();
 
     QString modelId;
     stream >> modelId;
     if (version > 4) {
-        if (!ModelList::globalInstance()->contains(modelId))
-            return false;
-        m_modelInfo = ModelList::globalInstance()->modelInfo(modelId);
+        if (ModelList::globalInstance()->contains(modelId))
+            m_modelInfo = ModelList::globalInstance()->modelInfo(modelId);
     } else {
-        if (!ModelList::globalInstance()->containsByFilename(modelId))
-            return false;
-        m_modelInfo = ModelList::globalInstance()->modelInfoByFilename(modelId);
+        if (ModelList::globalInstance()->containsByFilename(modelId))
+            m_modelInfo = ModelList::globalInstance()->modelInfoByFilename(modelId);
     }
-    emit modelInfoChanged();
+    if (!m_modelInfo.id().isEmpty())
+        emit modelInfoChanged();
+
+    bool discardKV = m_modelInfo.id().isEmpty();
 
     // Prior to version 2 gptj models had a bug that fixed the kv_cache to F32 instead of F16 so
     // unfortunately, we cannot deserialize these
     if (version < 2 && m_modelInfo.filename().contains("gpt4all-j"))
-        return false;
+        discardKV = true;
+
     if (version > 2) {
         stream >> m_collections;
         emit collectionListChanged(m_collections);
     }
+
+    bool deserializeKV = true;
+    if (version > 5)
+        stream >> deserializeKV;
+
     m_llmodel->setModelInfo(m_modelInfo);
-    if (!m_llmodel->deserialize(stream, version))
+    if (!m_llmodel->deserialize(stream, version, deserializeKV, discardKV))
         return false;
     if (!m_chatModel->deserialize(stream, version))
         return false;
+
+    if (!deserializeKV || discardKV)
+        m_llmodel->setStateFromText(m_chatModel->text());
+
     emit chatModelChanged();
     return stream.status() == QDataStream::Ok;
 }

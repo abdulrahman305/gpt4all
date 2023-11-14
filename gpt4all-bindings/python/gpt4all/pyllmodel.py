@@ -1,55 +1,45 @@
+import atexit
 import ctypes
+import importlib.resources
 import logging
 import os
 import platform
-from queue import Queue
 import re
 import subprocess
 import sys
 import threading
+from contextlib import ExitStack
+from queue import Queue
 from typing import Callable, Iterable, List
-
-import pkg_resources
 
 logger: logging.Logger = logging.getLogger(__name__)
 
 
+file_manager = ExitStack()
+atexit.register(file_manager.close)  # clean up files on exit
+
 # TODO: provide a config file to make this more robust
-LLMODEL_PATH = os.path.join("llmodel_DO_NOT_MODIFY", "build").replace("\\", "\\\\")
-MODEL_LIB_PATH = str(pkg_resources.resource_filename("gpt4all", LLMODEL_PATH)).replace("\\", "\\\\")
+MODEL_LIB_PATH = file_manager.enter_context(importlib.resources.as_file(
+    importlib.resources.files("gpt4all") / "llmodel_DO_NOT_MODIFY" / "build",
+))
 
 
 def load_llmodel_library():
-    system = platform.system()
+    ext = {"Darwin": "dylib", "Linux": "so", "Windows": "dll"}[platform.system()]
 
-    def get_c_shared_lib_extension():
-        if system == "Darwin":
-            return "dylib"
-        elif system == "Linux":
-            return "so"
-        elif system == "Windows":
-            return "dll"
-        else:
-            raise Exception("Operating System not supported")
+    try:
+        # Linux, Windows, MinGW
+        lib = ctypes.CDLL(str(MODEL_LIB_PATH / f"libllmodel.{ext}"))
+    except FileNotFoundError:
+        if ext != 'dll':
+            raise
+        # MSVC
+        lib = ctypes.CDLL(str(MODEL_LIB_PATH / "llmodel.dll"))
 
-    c_lib_ext = get_c_shared_lib_extension()
-
-    llmodel_file = "libllmodel" + "." + c_lib_ext
-
-    llmodel_dir = str(pkg_resources.resource_filename("gpt4all", os.path.join(LLMODEL_PATH, llmodel_file))).replace(
-        "\\", "\\\\"
-    )
-
-    llmodel_lib = ctypes.CDLL(llmodel_dir)
-
-    return llmodel_lib
+    return lib
 
 
 llmodel = load_llmodel_library()
-
-
-class LLModelError(ctypes.Structure):
-    _fields_ = [("message", ctypes.c_char_p), ("code", ctypes.c_int32)]
 
 
 class LLModelPromptContext(ctypes.Structure):
@@ -83,7 +73,7 @@ class LLModelGPUDevice(ctypes.Structure):
 llmodel.llmodel_model_create.argtypes = [ctypes.c_char_p]
 llmodel.llmodel_model_create.restype = ctypes.c_void_p
 
-llmodel.llmodel_model_create2.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.POINTER(LLModelError)]
+llmodel.llmodel_model_create2.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.POINTER(ctypes.c_char_p)]
 llmodel.llmodel_model_create2.restype = ctypes.c_void_p
 
 llmodel.llmodel_model_destroy.argtypes = [ctypes.c_void_p]
@@ -131,7 +121,7 @@ llmodel.llmodel_set_implementation_search_path.restype = None
 llmodel.llmodel_threadCount.argtypes = [ctypes.c_void_p]
 llmodel.llmodel_threadCount.restype = ctypes.c_int32
 
-llmodel.llmodel_set_implementation_search_path(MODEL_LIB_PATH.encode("utf-8"))
+llmodel.llmodel_set_implementation_search_path(str(MODEL_LIB_PATH).replace("\\", r"\\").encode("utf-8"))
 
 llmodel.llmodel_available_gpu_devices.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.POINTER(ctypes.c_int32)]
 llmodel.llmodel_available_gpu_devices.restype = ctypes.POINTER(LLModelGPUDevice)
@@ -154,6 +144,14 @@ RawResponseCallbackType = Callable[[int, bytes], bool]
 
 def empty_response_callback(token_id: int, response: str) -> bool:
     return True
+
+
+def _create_model(model_path: bytes) -> ctypes.c_void_p:
+    err = ctypes.c_char_p()
+    model = llmodel.llmodel_model_create2(model_path, b"auto", ctypes.byref(err))
+    if model is None:
+        raise ValueError(f"Unable to instantiate model: {err.decode()}")
+    return model
 
 
 class LLModel:
@@ -184,12 +182,8 @@ class LLModel:
 
     def memory_needed(self, model_path: str) -> int:
         model_path_enc = model_path.encode("utf-8")
-        self.model = llmodel.llmodel_model_create(model_path_enc)
-
-        if self.model is not None:
-            return llmodel.llmodel_required_mem(self.model, model_path_enc)
-        else:
-            raise ValueError("Unable to instantiate model")
+        self.model = _create_model(model_path_enc)
+        return llmodel.llmodel_required_mem(self.model, model_path_enc)
 
     def list_gpu(self, model_path: str) -> list:
         """
@@ -259,12 +253,9 @@ class LLModel:
         True if model loaded successfully, False otherwise
         """
         model_path_enc = model_path.encode("utf-8")
-        self.model = llmodel.llmodel_model_create(model_path_enc)
+        self.model = _create_model(model_path_enc)
 
-        if self.model is not None:
-            llmodel.llmodel_loadModel(self.model, model_path_enc)
-        else:
-            raise ValueError("Unable to instantiate model")
+        llmodel.llmodel_loadModel(self.model, model_path_enc)
 
         filename = os.path.basename(model_path)
         self.model_name = os.path.splitext(filename)[0]

@@ -4,6 +4,10 @@
 #include <iostream>
 #include <unordered_set>
 
+#ifdef GGML_USE_KOMPUTE
+#include "ggml-vulkan.h"
+#endif
+
 void LLModel::recalculateContext(PromptContext &promptCtx, std::function<bool(bool)> recalculate) {
     size_t i = 0;
     promptCtx.n_past = 0;
@@ -88,10 +92,10 @@ void LLModel::prompt(const std::string &prompt,
             if (int32_t(promptCtx.tokens.size()) == promptCtx.n_ctx)
                 promptCtx.tokens.erase(promptCtx.tokens.begin());
             promptCtx.tokens.push_back(batch.at(t));
+            promptCtx.n_past += 1;
             if (!promptCallback(batch.at(t)))
                 return;
         }
-        promptCtx.n_past += batch.size();
         i = batch_end;
     }
 
@@ -121,8 +125,6 @@ void LLModel::prompt(const std::string &prompt,
             std::cerr << implementation().modelType() << " ERROR: Failed to predict next token\n";
             return;
         }
-
-        promptCtx.n_past += 1;
 
         // display text
         for (const auto token : endTokens()) {
@@ -158,6 +160,7 @@ void LLModel::prompt(const std::string &prompt,
             if (int32_t(promptCtx.tokens.size()) == promptCtx.n_ctx)
                 promptCtx.tokens.erase(promptCtx.tokens.begin());
             promptCtx.tokens.push_back(t);
+            promptCtx.n_past += 1;
             //TODO: Conversion to std::string can be avoided here...
             if (!responseCallback(t, std::string(tokenToString(t))))
                 return;
@@ -173,4 +176,27 @@ std::vector<float> LLModel::embedding(const std::string &/*text*/)
         std::cerr << implementation().modelType() << errorMessage;
     }
     return std::vector<float>();
+}
+
+std::vector<LLModel::GPUDevice> LLModel::availableGPUDevices()
+{
+#if defined(GGML_USE_KOMPUTE)
+    std::vector<ggml_vk_device> vkDevices = ggml_vk_available_devices(0);
+
+    std::vector<LLModel::GPUDevice> devices;
+    for(const auto& vkDevice : vkDevices) {
+        LLModel::GPUDevice device;
+        device.index = vkDevice.index;
+        device.type = vkDevice.type;
+        device.heapSize = vkDevice.heapSize;
+        device.name = vkDevice.name;
+        device.vendor = vkDevice.vendor;
+
+        devices.push_back(device);
+    }
+
+    return devices;
+#else
+    return std::vector<LLModel::GPUDevice>();
+#endif
 }

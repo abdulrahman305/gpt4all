@@ -1,5 +1,6 @@
 #include "mysettings.h"
 #include "modellist.h"
+#include "../gpt4all-backend/llmodel.h"
 
 #include <QDir>
 #include <QFile>
@@ -9,8 +10,7 @@
 #include <QUrl>
 
 static int      default_threadCount         = std::min(4, (int32_t) std::thread::hardware_concurrency());
-static bool     default_saveChats           = false;
-static bool     default_saveChatGPTChats    = true;
+static bool     default_saveChatsContext    = false;
 static bool     default_serverChat          = false;
 static QString  default_userDefaultModel    = "Application default";
 static bool     default_forceMetal          = false;
@@ -23,6 +23,7 @@ static bool     default_localDocsShowReferences = true;
 static QString  default_networkAttribution      = "";
 static bool     default_networkIsActive         = false;
 static bool     default_networkUsageStatsActive = false;
+static QString  default_device              = "Auto";
 
 static QString defaultLocalModelsPath()
 {
@@ -62,6 +63,24 @@ MySettings::MySettings()
     : QObject{nullptr}
 {
     QSettings::setDefaultFormat(QSettings::IniFormat);
+
+    std::vector<LLModel::GPUDevice> devices = LLModel::availableGPUDevices();
+    QVector<QString> deviceList{ "Auto" };
+    for (LLModel::GPUDevice &d : devices)
+        deviceList << QString::fromStdString(d.name);
+    deviceList << "CPU";
+    setDeviceList(deviceList);
+}
+
+Q_INVOKABLE QVector<QString> MySettings::deviceList() const
+{
+    return m_deviceList;
+}
+
+void MySettings::setDeviceList(const QVector<QString> &deviceList)
+{
+    m_deviceList = deviceList;
+    emit deviceListChanged();
 }
 
 void MySettings::restoreModelDefaults(const ModelInfo &model)
@@ -79,9 +98,11 @@ void MySettings::restoreModelDefaults(const ModelInfo &model)
 
 void MySettings::restoreApplicationDefaults()
 {
+    setChatTheme(default_chatTheme);
+    setFontSize(default_fontSize);
+    setDevice(default_device);
     setThreadCount(default_threadCount);
-    setSaveChats(default_saveChats);
-    setSaveChatGPTChats(default_saveChatGPTChats);
+    setSaveChatsContext(default_saveChatsContext);
     setServerChat(default_serverChat);
     setModelPath(defaultLocalModelsPath());
     setUserDefaultModel(default_userDefaultModel);
@@ -374,40 +395,22 @@ void MySettings::setThreadCount(int c)
     emit threadCountChanged();
 }
 
-bool MySettings::saveChats() const
+bool MySettings::saveChatsContext() const
 {
     QSettings setting;
     setting.sync();
-    return setting.value("saveChats", default_saveChats).toBool();
+    return setting.value("saveChatsContext", default_saveChatsContext).toBool();
 }
 
-void MySettings::setSaveChats(bool b)
+void MySettings::setSaveChatsContext(bool b)
 {
-    if (saveChats() == b)
+    if (saveChatsContext() == b)
         return;
 
     QSettings setting;
-    setting.setValue("saveChats", b);
+    setting.setValue("saveChatsContext", b);
     setting.sync();
-    emit saveChatsChanged();
-}
-
-bool MySettings::saveChatGPTChats() const
-{
-    QSettings setting;
-    setting.sync();
-    return setting.value("saveChatGPTChats", default_saveChatGPTChats).toBool();
-}
-
-void MySettings::setSaveChatGPTChats(bool b)
-{
-    if (saveChatGPTChats() == b)
-        return;
-
-    QSettings setting;
-    setting.setValue("saveChatGPTChats", b);
-    setting.sync();
-    emit saveChatGPTChatsChanged();
+    emit saveChatsContextChanged();
 }
 
 bool MySettings::serverChat() const
@@ -485,7 +488,7 @@ QString MySettings::chatTheme() const
 
 void MySettings::setChatTheme(const QString &u)
 {
-    if(chatTheme() == u)
+    if (chatTheme() == u)
         return;
 
     QSettings setting;
@@ -503,13 +506,31 @@ QString MySettings::fontSize() const
 
 void MySettings::setFontSize(const QString &u)
 {
-    if(fontSize() == u)
+    if (fontSize() == u)
         return;
 
     QSettings setting;
     setting.setValue("fontSize", u);
     setting.sync();
     emit fontSizeChanged();
+}
+
+QString MySettings::device() const
+{
+    QSettings setting;
+    setting.sync();
+    return setting.value("device", default_device).toString();
+}
+
+void MySettings::setDevice(const QString &u)
+{
+    if (device() == u)
+        return;
+
+    QSettings setting;
+    setting.setValue("device", u);
+    setting.sync();
+    emit deviceChanged();
 }
 
 bool MySettings::forceMetal() const

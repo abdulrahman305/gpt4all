@@ -10,8 +10,7 @@ class MySettings : public QObject
 {
     Q_OBJECT
     Q_PROPERTY(int threadCount READ threadCount WRITE setThreadCount NOTIFY threadCountChanged)
-    Q_PROPERTY(bool saveChats READ saveChats WRITE setSaveChats NOTIFY saveChatsChanged)
-    Q_PROPERTY(bool saveChatGPTChats READ saveChatGPTChats WRITE setSaveChatGPTChats NOTIFY saveChatGPTChatsChanged)
+    Q_PROPERTY(bool saveChatsContext READ saveChatsContext WRITE setSaveChatsContext NOTIFY saveChatsContextChanged)
     Q_PROPERTY(bool serverChat READ serverChat WRITE setServerChat NOTIFY serverChatChanged)
     Q_PROPERTY(QString modelPath READ modelPath WRITE setModelPath NOTIFY modelPathChanged)
     Q_PROPERTY(QString userDefaultModel READ userDefaultModel WRITE setUserDefaultModel NOTIFY userDefaultModelChanged)
@@ -25,6 +24,8 @@ class MySettings : public QObject
     Q_PROPERTY(QString networkAttribution READ networkAttribution WRITE setNetworkAttribution NOTIFY networkAttributionChanged)
     Q_PROPERTY(bool networkIsActive READ networkIsActive WRITE setNetworkIsActive NOTIFY networkIsActiveChanged)
     Q_PROPERTY(bool networkUsageStatsActive READ networkUsageStatsActive WRITE setNetworkUsageStatsActive NOTIFY networkUsageStatsActiveChanged)
+    Q_PROPERTY(QString device READ device WRITE setDevice NOTIFY deviceChanged)
+    Q_PROPERTY(QVector<QString> deviceList READ deviceList NOTIFY deviceListChanged)
 
 public:
     static MySettings *globalInstance();
@@ -62,10 +63,8 @@ public:
     // Application settings
     int threadCount() const;
     void setThreadCount(int c);
-    bool saveChats() const;
-    void setSaveChats(bool b);
-    bool saveChatGPTChats() const;
-    void setSaveChatGPTChats(bool b);
+    bool saveChatsContext() const;
+    void setSaveChatsContext(bool b);
     bool serverChat() const;
     void setServerChat(bool b);
     QString modelPath() const;
@@ -78,6 +77,8 @@ public:
     void setFontSize(const QString &u);
     bool forceMetal() const;
     void setForceMetal(bool b);
+    QString device() const;
+    void setDevice(const QString &u);
 
     // Release/Download settings
     QString lastVersionStarted() const;
@@ -102,6 +103,9 @@ public:
     QString attemptModelLoad() const;
     void setAttemptModelLoad(const QString &modelFile);
 
+    QVector<QString> deviceList() const;
+    void setDeviceList(const QVector<QString> &deviceList);
+
 Q_SIGNALS:
     void nameChanged(const ModelInfo &model);
     void filenameChanged(const ModelInfo &model);
@@ -115,8 +119,7 @@ Q_SIGNALS:
     void promptTemplateChanged(const ModelInfo &model);
     void systemPromptChanged(const ModelInfo &model);
     void threadCountChanged();
-    void saveChatsChanged();
-    void saveChatGPTChatsChanged();
+    void saveChatsContextChanged();
     void serverChatChanged();
     void modelPathChanged();
     void userDefaultModelChanged();
@@ -131,9 +134,12 @@ Q_SIGNALS:
     void networkIsActiveChanged();
     void networkUsageStatsActiveChanged();
     void attemptModelLoadChanged();
+    void deviceChanged();
+    void deviceListChanged();
 
 private:
     bool m_forceMetal;
+    QVector<QString> m_deviceList;
 
 private:
     explicit MySettings();

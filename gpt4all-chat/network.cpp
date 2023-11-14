@@ -317,16 +317,6 @@ void Network::sendNetworkToggled(bool isActive)
     sendMixpanelEvent("network_toggled", QVector<KeyValue>{kv});
 }
 
-void Network::sendSaveChatsToggled(bool isActive)
-{
-    if (!MySettings::globalInstance()->networkUsageStatsActive())
-        return;
-    KeyValue kv;
-    kv.key = QString("isActive");
-    kv.value = QJsonValue(isActive);
-    sendMixpanelEvent("savechats_toggled", QVector<KeyValue>{kv});
-}
-
 void Network::sendNewChat(int count)
 {
     if (!MySettings::globalInstance()->networkUsageStatsActive())
@@ -393,6 +383,8 @@ void Network::sendMixpanelEvent(const QString &ev, const QVector<KeyValue> &valu
     properties.insert("name", QCoreApplication::applicationName() + " v"
         + QCoreApplication::applicationVersion());
     properties.insert("model", ChatListModel::globalInstance()->currentChat()->modelInfo().filename());
+    properties.insert("requestedDevice", MySettings::globalInstance()->device());
+    properties.insert("actualDevice", ChatListModel::globalInstance()->currentChat()->device());
 
     // Some additional startup information
     if (ev == "startup") {

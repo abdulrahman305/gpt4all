@@ -21,10 +21,12 @@ class Chat : public QObject
     Q_PROPERTY(bool responseInProgress READ responseInProgress NOTIFY responseInProgressChanged)
     Q_PROPERTY(bool isRecalc READ isRecalc NOTIFY recalcChanged)
     Q_PROPERTY(bool isServer READ isServer NOTIFY isServerChanged)
-    Q_PROPERTY(QString responseState READ responseState NOTIFY responseStateChanged)
+    Q_PROPERTY(ResponseState responseState READ responseState NOTIFY responseStateChanged)
     Q_PROPERTY(QList<QString> collectionList READ collectionList NOTIFY collectionListChanged)
     Q_PROPERTY(QString modelLoadingError READ modelLoadingError NOTIFY modelLoadingErrorChanged)
     Q_PROPERTY(QString tokenSpeed READ tokenSpeed NOTIFY tokenSpeedChanged);
+    Q_PROPERTY(QString device READ device NOTIFY deviceChanged);
+    Q_PROPERTY(QString fallbackReason READ fallbackReason NOTIFY fallbackReasonChanged);
     QML_ELEMENT
     QML_UNCREATABLE("Only creatable from c++!")
 
@@ -52,6 +54,8 @@ public:
     }
     ChatModel *chatModel() { return m_chatModel; }
 
+    bool isNewChat() const { return m_name == tr("New Chat") && !m_chatModel->count(); }
+
     Q_INVOKABLE void reset();
     Q_INVOKABLE void processSystemPrompt();
     Q_INVOKABLE bool isModelLoaded() const;
@@ -64,7 +68,7 @@ public:
 
     QString response() const;
     bool responseInProgress() const { return m_responseInProgress; }
-    QString responseState() const;
+    ResponseState responseState() const;
     ModelInfo modelInfo() const;
     void setModelInfo(const ModelInfo &modelInfo);
     bool isRecalc() const;
@@ -88,6 +92,8 @@ public:
     QString modelLoadingError() const { return m_modelLoadingError; }
 
     QString tokenSpeed() const { return m_tokenSpeed; }
+    QString device() const { return m_device; }
+    QString fallbackReason() const { return m_fallbackReason; }
 
 public Q_SLOTS:
     void serverNewPromptResponsePair(const QString &prompt);
@@ -115,6 +121,8 @@ Q_SIGNALS:
     void isServerChanged();
     void collectionListChanged(const QList<QString> &collectionList);
     void tokenSpeedChanged();
+    void deviceChanged();
+    void fallbackReasonChanged();
 
 private Q_SLOTS:
     void handleResponseChanged(const QString &response);
@@ -125,6 +133,8 @@ private Q_SLOTS:
     void handleRecalculating();
     void handleModelLoadingError(const QString &error);
     void handleTokenSpeedChanged(const QString &tokenSpeed);
+    void handleDeviceChanged(const QString &device);
+    void handleFallbackReasonChanged(const QString &device);
     void handleDatabaseResultsChanged(const QList<ResultInfo> &results);
     void handleModelInfoChanged(const ModelInfo &modelInfo);
     void handleModelInstalled();
@@ -137,6 +147,8 @@ private:
     ModelInfo m_modelInfo;
     QString m_modelLoadingError;
     QString m_tokenSpeed;
+    QString m_device;
+    QString m_fallbackReason;
     QString m_response;
     QList<QString> m_collections;
     ChatModel *m_chatModel;

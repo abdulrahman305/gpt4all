@@ -36,18 +36,25 @@ namespace {
 const char *modelType_ = "LLaMA";
 }
 
+static bool llama_verbose() {
+    const char* var = getenv("GPT4ALL_VERBOSE_LLAMACPP");
+    return var && *var;
+}
+
+static void llama_log_callback(enum ggml_log_level level, const char *text, void *userdata) {
+    (void)userdata;
+    if (llama_verbose() || level <= GGML_LOG_LEVEL_ERROR) {
+        fputs(text, stderr);
+    }
+}
+
 struct gpt_params {
     int32_t seed          = -1;   // RNG seed
     int32_t n_keep        = 0;    // number of tokens to keep from initial prompt
-#if LLAMA_DATE <= 230511
-    int32_t n_parts       = -1;   // amount of model parts (-1 = determine from model dimensions)
-#endif
 
-#if LLAMA_DATE >= 230519
     // sampling parameters
     float   tfs_z         = 1.0f; // 1.0 = disabled
     float   typical_p     = 1.0f; // 1.0 = disabled
-#endif
 
     std::string prompt = "";
 
@@ -57,7 +64,6 @@ struct gpt_params {
     bool use_mlock         = false; // use mlock to keep model in memory
 };
 
-#if LLAMA_DATE >= 230519
 static int llama_sample_top_p_top_k(
         llama_context *ctx,
         const llama_token *last_n_tokens_data,
@@ -85,7 +91,6 @@ static int llama_sample_top_p_top_k(
     llama_sample_temperature(ctx, &candidates_p, temp);
     return llama_sample_token(ctx, &candidates_p);
 }
-#endif
 
 struct LLamaPrivate {
     const std::string modelPath;
@@ -93,6 +98,7 @@ struct LLamaPrivate {
     llama_context *ctx = nullptr;
     llama_context_params params;
     int64_t n_threads = 0;
+    std::vector<LLModel::Token> end_tokens;
 };
 
 LLamaModel::LLamaModel()
@@ -149,11 +155,10 @@ bool LLamaModel::loadModel(const std::string &modelPath)
 #else
     d_ptr->params.use_mlock  = params.use_mlock;
 #endif
-#if LLAMA_DATE <= 230511
-    d_ptr->params.n_parts  = params.n_parts;
-#endif
 #ifdef GGML_USE_METAL
-    std::cerr << "llama.cpp: using Metal" << std::endl;
+    if (llama_verbose()) {
+        std::cerr << "llama.cpp: using Metal" << std::endl;
+    }
     // metal always runs the whole model if n_gpu_layers is not 0, at least
     // currently
     d_ptr->params.n_gpu_layers = 1;
@@ -168,9 +173,15 @@ bool LLamaModel::loadModel(const std::string &modelPath)
 
     d_ptr->ctx = llama_init_from_file(modelPath.c_str(), d_ptr->params);
     if (!d_ptr->ctx) {
+#ifdef GGML_USE_KOMPUTE
+        // Explicitly free the device so next load it doesn't use it
+        ggml_vk_free_device();
+#endif
         std::cerr << "LLAMA ERROR: failed to load model from " <<  modelPath << std::endl;
         return false;
     }
+
+    d_ptr->end_tokens = {llama_token_eos(d_ptr->ctx)};
 
 #ifdef GGML_USE_KOMPUTE
     if (ggml_vk_has_device()) {
@@ -194,7 +205,7 @@ int32_t LLamaModel::threadCount() const {
 
 LLamaModel::~LLamaModel()
 {
-    if(d_ptr->ctx) {
+    if (d_ptr->ctx) {
         llama_free(d_ptr->ctx);
     }
 }
@@ -222,9 +233,9 @@ size_t LLamaModel::restoreState(const uint8_t *src)
 
 std::vector<LLModel::Token> LLamaModel::tokenize(PromptContext &ctx, const std::string &str) const
 {
-    const bool useBOS = ctx.n_past == 0 && (ctx.tokens.empty() || ctx.tokens.front() != llama_token_bos());
+    const bool useBOS = ctx.n_past == 0 && (ctx.tokens.empty() || ctx.tokens.front() != llama_token_bos(d_ptr->ctx));
     std::vector<LLModel::Token> fres(str.size()+4);
-    auto fres_len = llama_tokenize(d_ptr->ctx, str.c_str(), fres.data(), fres.size(), useBOS);
+    auto fres_len = llama_tokenize(d_ptr->ctx, str.c_str(), str.length(), fres.data(), fres.size(), useBOS);
     fres.resize(fres_len);
     return fres;
 }
@@ -245,16 +256,7 @@ LLModel::Token LLamaModel::sampleToken(PromptContext &promptCtx) const
 
 bool LLamaModel::evalTokens(PromptContext &ctx, const std::vector<int32_t> &tokens) const
 {
-    // When we recalculate context we could have erased the original BOS token... we need to replace it
-    const bool useBOS = ctx.n_past == 0 && (ctx.tokens.empty() || ctx.tokens.front() != llama_token_bos());
-    if (useBOS) {
-        std::vector<int32_t> myTokens;
-        myTokens.push_back(llama_token_bos());
-        myTokens.insert(myTokens.end(), tokens.begin(), tokens.end());
-        ctx.n_past += 1;
-        return llama_eval(d_ptr->ctx, myTokens.data(), myTokens.size(), ctx.n_past, d_ptr->n_threads) == 0;
-    } else
-        return llama_eval(d_ptr->ctx, tokens.data(), tokens.size(), ctx.n_past, d_ptr->n_threads) == 0;
+    return llama_eval(d_ptr->ctx, tokens.data(), tokens.size(), ctx.n_past, d_ptr->n_threads) == 0;
 }
 
 int32_t LLamaModel::contextLength() const
@@ -264,8 +266,7 @@ int32_t LLamaModel::contextLength() const
 
 const std::vector<LLModel::Token> &LLamaModel::endTokens() const
 {
-    static const std::vector<LLModel::Token> fres = {llama_token_eos()};
-    return fres;
+    return d_ptr->end_tokens;
 }
 
 #if defined(GGML_USE_KOMPUTE)
@@ -304,8 +305,9 @@ bool LLamaModel::initializeGPUDevice(size_t memoryRequired, const std::string& d
 #endif
 }
 
-bool LLamaModel::initializeGPUDevice(const LLModel::GPUDevice &device)
+bool LLamaModel::initializeGPUDevice(const LLModel::GPUDevice &device, std::string *unavail_reason)
 {
+    bool result = false;
 #if defined(GGML_USE_KOMPUTE)
     ggml_vk_device vkDevice;
     vkDevice.index = device.index;
@@ -313,10 +315,16 @@ bool LLamaModel::initializeGPUDevice(const LLModel::GPUDevice &device)
     vkDevice.heapSize = device.heapSize;
     vkDevice.name = device.name;
     vkDevice.vendor = device.vendor;
-    return ggml_vk_init_device(vkDevice);
+    result = ggml_vk_init_device(vkDevice);
+    if (!result && unavail_reason) {
+        *unavail_reason = "failed to init GPU";
+    }
 #else
-    return false;
+    if (unavail_reason) {
+        *unavail_reason = "built without Kompute";
+    }
 #endif
+    return result;
 }
 
 bool LLamaModel::initializeGPUDevice(int device)
@@ -335,6 +343,26 @@ bool LLamaModel::hasGPUDevice()
 #else
     return false;
 #endif
+}
+
+bool LLamaModel::usingGPUDevice()
+{
+#if defined(GGML_USE_KOMPUTE)
+    return ggml_vk_using_vulkan();
+#elif defined(GGML_USE_METAL)
+    return true;
+#endif
+    return false;
+}
+
+std::string get_arch_name(gguf_context *ctx_gguf) {
+    std::string arch_name;
+    const int kid = gguf_find_key(ctx_gguf, "general.architecture");
+    enum gguf_type ktype = gguf_get_kv_type(ctx_gguf, kid);
+    if (ktype != (GGUF_TYPE_STRING)) {
+        throw std::runtime_error("ERROR: Can't get general architecture from gguf file.");
+    }
+    return gguf_get_val_str(ctx_gguf, kid);
 }
 
 #if defined(_WIN32)
@@ -356,42 +384,40 @@ DLL_EXPORT const char *get_build_variant() {
     return GGML_BUILD_VARIANT;
 }
 
-DLL_EXPORT bool magic_match(std::istream& f) {
-    // Check magic
-    uint32_t magic = 0;
-    f.read(reinterpret_cast<char*>(&magic), sizeof(magic));
-    if (magic != 0x67676a74) return false;
-    // Check version
-    uint32_t version = 0;
-    f.read(reinterpret_cast<char*>(&version), sizeof(version));
-    if (!(version LLAMA_VERSIONS)) {
+DLL_EXPORT bool magic_match(const char * fname) {
+    struct ggml_context * ctx_meta = NULL;
+    struct gguf_init_params params = {
+        /*.no_alloc = */ true,
+        /*.ctx      = */ &ctx_meta,
+    };
+    gguf_context *ctx_gguf = gguf_init_from_file(fname, params);
+    if (!ctx_gguf) {
+        std::cerr << __func__ << ": gguf_init_from_file failed\n";
         return false;
     }
-    llama_file_hparams hparams;
-    f.read(reinterpret_cast<char*>(&hparams), sizeof(hparams));
-    if (!(hparams.n_vocab >= 32000 && hparams.n_vocab <= 32100)) {
-        return false; // not a llama.
+
+    bool valid = true;
+
+    int gguf_ver = gguf_get_version(ctx_gguf);
+    if (valid && gguf_ver > 3) {
+        std::cerr << __func__ << ": unsupported gguf version: " << gguf_ver << "\n";
+        valid = false;
     }
-#ifdef GGML_USE_METAL
-    // Check quant supported on metal
-    // skip fields
-    switch(hparams.ftype) {
-        // currently supported on Metal https://github.com/ggerganov/llama.cpp/blob/ae9663f1887513e152839e91f61c513075a19422/ggml-metal.m#L51-L55
-        case LLAMA_FTYPE_MOSTLY_F16:
-        case LLAMA_FTYPE_MOSTLY_Q2_K:
-        case LLAMA_FTYPE_MOSTLY_Q4_0:
-        case LLAMA_FTYPE_MOSTLY_Q6_K:
-        case LLAMA_FTYPE_MOSTLY_Q4_K_S:
-        case LLAMA_FTYPE_MOSTLY_Q4_K_M:
-            return true;
-        default: // unsupported quant-type for Metal
-            return false;
+
+    auto arch = get_arch_name(ctx_gguf);
+    if (valid && !(arch == "llama" || arch == "starcoder" || arch == "falcon" || arch == "mpt")) {
+        if (!(arch == "gptj" || arch == "bert")) { // we support these via other modules
+            std::cerr << __func__ << ": unsupported model architecture: " << arch << "\n";
+        }
+        valid = false;
     }
-#endif
-    return true;
+
+    gguf_free(ctx_gguf);
+    return valid;
 }
 
 DLL_EXPORT LLModel *construct() {
+    llama_log_set(llama_log_callback, nullptr);
     return new LLamaModel;
 }
 }

@@ -1,16 +1,17 @@
+#!/usr/bin/env python3
 """GPT4All CLI
 
 The GPT4All CLI is a self-contained script based on the `gpt4all` and `typer` packages. It offers a
 REPL to communicate with a language model similar to the chat GUI application, but more basic.
 """
 
+import importlib.metadata
 import io
-import pkg_resources  # should be present as a dependency of gpt4all
 import sys
-import typer
-
 from collections import namedtuple
 from typing_extensions import Annotated
+
+import typer
 from gpt4all import GPT4All
 
 
@@ -53,7 +54,7 @@ def repl(
     model: Annotated[
         str,
         typer.Option("--model", "-m", help="Model to use for chatbot"),
-    ] = "ggml-gpt4all-j-v1.3-groovy",
+    ] = "mistral-7b-instruct-v0.1.Q4_0.gguf",
     n_threads: Annotated[
         int,
         typer.Option("--n-threads", "-t", help="Number of threads to use for chatbot"),
@@ -79,7 +80,7 @@ def repl(
 
     use_new_loop = False
     try:
-        version = pkg_resources.Environment()['gpt4all'][0].version
+        version = importlib.metadata.version('gpt4all')
         version_major = int(version.split('.')[0])
         if version_major >= 1:
             use_new_loop = True

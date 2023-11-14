@@ -58,6 +58,8 @@ const fltArray = createEmbedding(model, "Pain is inevitable, suffering optional"
 *   (win) msvc version 143
     *   Can be obtained with visual studio 2022 build tools
 *   python 3
+*   On Windows and Linux, building GPT4All requires the complete Vulkan SDK. You may download it from here: https://vulkan.lunarg.com/sdk/home
+*   macOS users do not need Vulkan, as GPT4All will use Metal instead.
 
 ### Build (from source)
 
@@ -703,7 +705,7 @@ Type: [boolean](https://developer.mozilla.org/docs/Web/JavaScript/Reference/Glob
 
 ##### url
 
-Remote download url. Defaults to `https://gpt4all.io/models/<modelName>`
+Remote download url. Defaults to `https://gpt4all.io/models/gguf/<modelName>`
 
 Type: [string](https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/String)
 

@@ -27,9 +27,10 @@ public:
     int32_t threadCount() const override;
     std::vector<GPUDevice> availableGPUDevices(size_t memoryRequired) override;
     bool initializeGPUDevice(size_t memoryRequired, const std::string& device) override;
-    bool initializeGPUDevice(const GPUDevice &device) override;
+    bool initializeGPUDevice(const GPUDevice &device, std::string *unavail_reason) override;
     bool initializeGPUDevice(int device) override;
     bool hasGPUDevice() override;
+    bool usingGPUDevice() override;
 
 private:
     LLamaPrivate *d_ptr;

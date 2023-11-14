@@ -10,6 +10,7 @@
 #include <cassert>
 #include <cstdlib>
 #include <sstream>
+#include <regex>
 #ifdef _MSC_VER
 #include <intrin.h>
 #endif
@@ -52,7 +53,7 @@ LLModel::Implementation::Implementation(Dlhandle &&dlhandle_)
     auto get_build_variant = m_dlhandle->get<const char *()>("get_build_variant");
     assert(get_build_variant);
     m_buildVariant = get_build_variant();
-    m_magicMatch = m_dlhandle->get<bool(std::ifstream&)>("magic_match");
+    m_magicMatch = m_dlhandle->get<bool(const char*)>("magic_match");
     assert(m_magicMatch);
     m_construct = m_dlhandle->get<LLModel *()>("construct");
     assert(m_construct);
@@ -81,6 +82,13 @@ const std::vector<LLModel::Implementation> &LLModel::Implementation::implementat
     static auto* libs = new std::vector<Implementation>([] () {
         std::vector<Implementation> fres;
 
+        std::string impl_name_re = "(bert|llama|gptj|llamamodel-mainline)";
+        if (requires_avxonly()) {
+            impl_name_re += "-avxonly";
+        } else {
+            impl_name_re += "-(default|metal)";
+        }
+        std::regex re(impl_name_re);
         auto search_in_directory = [&](const std::string& paths) {
             std::stringstream ss(paths);
             std::string path;
@@ -90,7 +98,10 @@ const std::vector<LLModel::Implementation> &LLModel::Implementation::implementat
                 // Iterate over all libraries
                 for (const auto& f : std::filesystem::directory_iterator(fs_path)) {
                     const std::filesystem::path& p = f.path();
+
                     if (p.extension() != LIB_FILE_EXT) continue;
+                    if (!std::regex_search(p.stem().string(), re)) continue;
+
                     // Add to list if model implementation
                     try {
                         Dlhandle dl(p.string());
@@ -111,31 +122,35 @@ const std::vector<LLModel::Implementation> &LLModel::Implementation::implementat
     return *libs;
 }
 
-const LLModel::Implementation* LLModel::Implementation::implementation(std::ifstream& f, const std::string& buildVariant) {
+const LLModel::Implementation* LLModel::Implementation::implementation(const char *fname, const std::string& buildVariant) {
+    bool buildVariantMatched = false;
     for (const auto& i : implementationList()) {
-        f.seekg(0);
-        if (!i.m_magicMatch(f)) continue;
         if (buildVariant != i.m_buildVariant) continue;
+        buildVariantMatched = true;
+
+        if (!i.m_magicMatch(fname)) continue;
         return &i;
+    }
+
+    if (!buildVariantMatched) {
+        std::cerr << "LLModel ERROR: Could not find any implementations for build variant: " << buildVariant << "\n";
     }
     return nullptr;
 }
 
 LLModel *LLModel::Implementation::construct(const std::string &modelPath, std::string buildVariant) {
-
-    if (!has_at_least_minimal_hardware())
+    if (!has_at_least_minimal_hardware()) {
+        std::cerr << "LLModel ERROR: CPU does not support AVX\n";
         return nullptr;
+    }
 
-    // Read magic
-    std::ifstream f(modelPath, std::ios::binary);
-    if (!f) return nullptr;
     // Get correct implementation
     const Implementation* impl = nullptr;
 
     #if defined(__APPLE__) && defined(__arm64__) // FIXME: See if metal works for intel macs
         if (buildVariant == "auto") {
             size_t total_mem = getSystemTotalRAMInBytes();
-            impl = implementation(f, "metal");
+            impl = implementation(modelPath.c_str(), "metal");
             if(impl) {
                 LLModel* metalimpl = impl->m_construct();
                 metalimpl->m_implementation = impl;
@@ -161,10 +176,9 @@ LLModel *LLModel::Implementation::construct(const std::string &modelPath, std::s
                 buildVariant = "default";
             }
         }
-        impl = implementation(f, buildVariant);
+        impl = implementation(modelPath.c_str(), buildVariant);
         if (!impl) return nullptr;
     }
-    f.close();
 
     // Construct and return llmodel implementation
     auto fres = impl->m_construct();

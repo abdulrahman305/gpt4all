@@ -27,13 +27,13 @@ public:
 
         static bool isImplementation(const Dlhandle&);
         static const std::vector<Implementation>& implementationList();
-        static const Implementation *implementation(std::ifstream& f, const std::string& buildVariant);
+        static const Implementation *implementation(const char *fname, const std::string& buildVariant);
         static LLModel *construct(const std::string &modelPath, std::string buildVariant = "auto");
         static void setImplementationsSearchPath(const std::string& path);
         static const std::string& implementationsSearchPath();
 
     private:
-        bool (*m_magicMatch)(std::ifstream& f);
+        bool (*m_magicMatch)(const char *fname);
         LLModel *(*m_construct)();
 
     private:
@@ -97,9 +97,16 @@ public:
 
     virtual std::vector<GPUDevice> availableGPUDevices(size_t /*memoryRequired*/) { return std::vector<GPUDevice>(); }
     virtual bool initializeGPUDevice(size_t /*memoryRequired*/, const std::string& /*device*/) { return false; }
-    virtual bool initializeGPUDevice(const GPUDevice &/*device*/) { return false; }
+    virtual bool initializeGPUDevice(const GPUDevice &/*device*/, std::string *unavail_reason = nullptr) {
+        if (unavail_reason) {
+            *unavail_reason = "model has no GPU support";
+        }
+        return false;
+    }
     virtual bool initializeGPUDevice(int /*device*/) { return false; }
     virtual bool hasGPUDevice() { return false; }
+    virtual bool usingGPUDevice() { return false; }
+    static std::vector<GPUDevice> availableGPUDevices();
 
 protected:
     // These are pure virtual because subclasses need to implement as the default implementation of
