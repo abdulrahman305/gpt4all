@@ -77,7 +77,6 @@ option(LLAMA_OPENBLAS               "llama: use OpenBLAS"                       
 #option(LLAMA_CUBLAS                 "llama: use cuBLAS"                                     OFF)
 #option(LLAMA_CLBLAST                "llama: use CLBlast"                                    OFF)
 #option(LLAMA_METAL                  "llama: use Metal"                                      OFF)
-#option(LLAMA_K_QUANTS               "llama: use k-quants"                                   ON)
 set(LLAMA_BLAS_VENDOR "Generic" CACHE STRING "llama: BLAS library vendor")
 set(LLAMA_CUDA_DMMV_X "32" CACHE STRING "llama: x stride for dmmv CUDA kernels")
 set(LLAMA_CUDA_DMMV_Y "1" CACHE STRING  "llama: y block size for dmmv CUDA kernels")
@@ -174,9 +173,9 @@ if (LLAMA_KOMPUTE)
         add_custom_command(
             OUTPUT ${spv_file}
             DEPENDS ${LLAMA_DIR}/${source}
-              ${LLAMA_DIR}/kompute/common.comp
-              ${LLAMA_DIR}/kompute/op_getrows.comp
-              ${LLAMA_DIR}/kompute/op_mul_mv_q_n.comp
+              ${LLAMA_DIR}/kompute-shaders/common.comp
+              ${LLAMA_DIR}/kompute-shaders/op_getrows.comp
+              ${LLAMA_DIR}/kompute-shaders/op_mul_mv_q_n.comp
             COMMAND ${glslc_executable} --target-env=vulkan1.2 -o ${spv_file} ${LLAMA_DIR}/${source}
             COMMENT "Compiling ${source} to ${source}.spv"
         )
@@ -196,7 +195,7 @@ if (LLAMA_KOMPUTE)
               COMMAND ${CMAKE_COMMAND} -E echo \"\#define ${HEADER_FILE_DEFINE}\" >> ${OUTPUT_HEADER_FILE}
               COMMAND ${CMAKE_COMMAND} -E echo "namespace kp {" >> ${OUTPUT_HEADER_FILE}
               COMMAND ${CMAKE_COMMAND} -E echo "namespace shader_data {" >> ${OUTPUT_HEADER_FILE}
-              COMMAND ${CMAKE_BINARY_DIR}/bin/$<CONFIG>/xxd -i ${spv_file} >> ${OUTPUT_HEADER_FILE}
+              COMMAND ${CMAKE_BINARY_DIR}/bin/$<CONFIG>/xxd -i ${RAW_FILE_NAME} >> ${OUTPUT_HEADER_FILE}
               COMMAND ${CMAKE_COMMAND} -E echo "}}" >> ${OUTPUT_HEADER_FILE}
               COMMAND ${CMAKE_COMMAND} -E echo \"\#endif // define ${HEADER_FILE_DEFINE}\" >> ${OUTPUT_HEADER_FILE}
               DEPENDS ${spv_file} xxd
@@ -210,7 +209,7 @@ if (LLAMA_KOMPUTE)
               COMMAND ${CMAKE_COMMAND} -E echo \"\#define ${HEADER_FILE_DEFINE}\" >> ${OUTPUT_HEADER_FILE}
               COMMAND ${CMAKE_COMMAND} -E echo "namespace kp {" >> ${OUTPUT_HEADER_FILE}
               COMMAND ${CMAKE_COMMAND} -E echo "namespace shader_data {" >> ${OUTPUT_HEADER_FILE}
-              COMMAND ${CMAKE_BINARY_DIR}/bin/xxd -i ${spv_file} >> ${OUTPUT_HEADER_FILE}
+              COMMAND ${CMAKE_BINARY_DIR}/bin/xxd -i ${RAW_FILE_NAME} >> ${OUTPUT_HEADER_FILE}
               COMMAND ${CMAKE_COMMAND} -E echo "}}" >> ${OUTPUT_HEADER_FILE}
               COMMAND ${CMAKE_COMMAND} -E echo \"\#endif // define ${HEADER_FILE_DEFINE}\" >> ${OUTPUT_HEADER_FILE}
               DEPENDS ${spv_file} xxd
@@ -227,38 +226,41 @@ if (LLAMA_KOMPUTE)
 
         # Compile our shaders
         compile_shader(SOURCES
-          kompute/op_scale.comp
-          kompute/op_add.comp
-          kompute/op_addrow.comp
-          kompute/op_mul.comp
-          kompute/op_mulrow.comp
-          kompute/op_silu.comp
-          kompute/op_relu.comp
-          kompute/op_gelu.comp
-          kompute/op_softmax.comp
-          kompute/op_norm.comp
-          kompute/op_rmsnorm.comp
-          kompute/op_diagmask.comp
-          kompute/op_mul_mat_mat_f32.comp
-          kompute/op_mul_mat_f16.comp
-          kompute/op_mul_mat_q8_0.comp
-          kompute/op_mul_mat_q4_0.comp
-          kompute/op_mul_mat_q4_1.comp
-          kompute/op_mul_mat_q6_k.comp
-          kompute/op_getrows_f16.comp
-          kompute/op_getrows_q4_0.comp
-          kompute/op_getrows_q4_1.comp
-          kompute/op_getrows_q6_k.comp
-          kompute/op_rope.comp
-          kompute/op_cpy_f16_f16.comp
-          kompute/op_cpy_f16_f32.comp
-          kompute/op_cpy_f32_f16.comp
-          kompute/op_cpy_f32_f32.comp
+          kompute-shaders/op_scale.comp
+          kompute-shaders/op_scale_8.comp
+          kompute-shaders/op_add.comp
+          kompute-shaders/op_addrow.comp
+          kompute-shaders/op_mul.comp
+          kompute-shaders/op_mulrow.comp
+          kompute-shaders/op_silu.comp
+          kompute-shaders/op_relu.comp
+          kompute-shaders/op_gelu.comp
+          kompute-shaders/op_softmax.comp
+          kompute-shaders/op_norm.comp
+          kompute-shaders/op_rmsnorm.comp
+          kompute-shaders/op_diagmask.comp
+          kompute-shaders/op_mul_mat_mat_f32.comp
+          kompute-shaders/op_mul_mat_f16.comp
+          kompute-shaders/op_mul_mat_q8_0.comp
+          kompute-shaders/op_mul_mat_q4_0.comp
+          kompute-shaders/op_mul_mat_q4_1.comp
+          kompute-shaders/op_mul_mat_q6_k.comp
+          kompute-shaders/op_getrows_f16.comp
+          kompute-shaders/op_getrows_q4_0.comp
+          kompute-shaders/op_getrows_q4_1.comp
+          kompute-shaders/op_getrows_q6_k.comp
+          kompute-shaders/op_rope_f16.comp
+          kompute-shaders/op_rope_f32.comp
+          kompute-shaders/op_cpy_f16_f16.comp
+          kompute-shaders/op_cpy_f16_f32.comp
+          kompute-shaders/op_cpy_f32_f16.comp
+          kompute-shaders/op_cpy_f32_f32.comp
         )
 
         # Create a custom target for our generated shaders
         add_custom_target(generated_shaders DEPENDS
           shaderop_scale.h
+          shaderop_scale_8.h
           shaderop_add.h
           shaderop_addrow.h
           shaderop_mul.h
@@ -280,7 +282,8 @@ if (LLAMA_KOMPUTE)
           shaderop_getrows_q4_0.h
           shaderop_getrows_q4_1.h
           shaderop_getrows_q6_k.h
-          shaderop_rope.h
+          shaderop_rope_f16.h
+          shaderop_rope_f32.h
           shaderop_cpy_f16_f16.h
           shaderop_cpy_f16_f32.h
           shaderop_cpy_f32_f16.h
@@ -289,14 +292,14 @@ if (LLAMA_KOMPUTE)
 
         # Create a custom command that depends on the generated_shaders
         add_custom_command(
-            OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/ggml-vulkan.stamp
-            COMMAND ${CMAKE_COMMAND} -E touch ${CMAKE_CURRENT_BINARY_DIR}/ggml-vulkan.stamp
+            OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/ggml-kompute.stamp
+            COMMAND ${CMAKE_COMMAND} -E touch ${CMAKE_CURRENT_BINARY_DIR}/ggml-kompute.stamp
             DEPENDS generated_shaders
-            COMMENT "Ensuring shaders are generated before compiling ggml-vulkan.cpp"
+            COMMENT "Ensuring shaders are generated before compiling ggml-kompute.cpp"
         )
 
         # Add the stamp to the main sources to ensure dependency tracking
-        set(GGML_SOURCES_KOMPUTE ${LLAMA_DIR}/ggml-vulkan.cpp ${LLAMA_DIR}/ggml-vulkan.h ${CMAKE_CURRENT_BINARY_DIR}/ggml-vulkan.stamp)
+        set(GGML_SOURCES_KOMPUTE ${LLAMA_DIR}/ggml-kompute.cpp ${LLAMA_DIR}/ggml-kompute.h ${CMAKE_CURRENT_BINARY_DIR}/ggml-kompute.stamp)
         add_compile_definitions(GGML_USE_KOMPUTE)
         set(LLAMA_EXTRA_LIBS ${LLAMA_EXTRA_LIBS} kompute)
         set(LLAMA_EXTRA_INCLUDES ${LLAMA_EXTRA_INCLUDES} ${CMAKE_BINARY_DIR})
@@ -564,33 +567,26 @@ function(include_ggml DIRECTORY SUFFIX WITH_LLAMA)
         endif()
     endif()
 
-    set(GGML_SOURCES_QUANT_K )
-    set(GGML_METAL_SOURCES )
-    if (LLAMA_K_QUANTS)
-        set(GGML_SOURCES_QUANT_K
-            ${DIRECTORY}/k_quants.h
-            ${DIRECTORY}/k_quants.c)
+    set(GGML_METAL_SOURCES)
+    if (LLAMA_METAL)
+        find_library(FOUNDATION_LIBRARY         Foundation              REQUIRED)
+        find_library(METAL_FRAMEWORK            Metal                   REQUIRED)
+        find_library(METALKIT_FRAMEWORK         MetalKit                REQUIRED)
+        find_library(METALPERFORMANCE_FRAMEWORK MetalPerformanceShaders REQUIRED)
 
-        if (LLAMA_METAL)
-            find_library(FOUNDATION_LIBRARY         Foundation              REQUIRED)
-            find_library(METAL_FRAMEWORK            Metal                   REQUIRED)
-            find_library(METALKIT_FRAMEWORK         MetalKit                REQUIRED)
-            find_library(METALPERFORMANCE_FRAMEWORK MetalPerformanceShaders REQUIRED)
+        set(GGML_METAL_SOURCES ${DIRECTORY}/ggml-metal.m ${DIRECTORY}/ggml-metal.h)
+        # get full path to the file
+        #add_compile_definitions(GGML_METAL_DIR_KERNELS="${CMAKE_CURRENT_SOURCE_DIR}/")
 
-            set(GGML_METAL_SOURCES ${DIRECTORY}/ggml-metal.m ${DIRECTORY}/ggml-metal.h)
-            # get full path to the file
-            #add_compile_definitions(GGML_METAL_DIR_KERNELS="${CMAKE_CURRENT_SOURCE_DIR}/")
+        # copy ggml-metal.metal to bin directory
+        configure_file(${DIRECTORY}/ggml-metal.metal bin/ggml-metal.metal COPYONLY)
 
-            # copy ggml-metal.metal to bin directory
-            configure_file(${DIRECTORY}/ggml-metal.metal bin/ggml-metal.metal COPYONLY)
-
-            set(LLAMA_EXTRA_LIBS ${LLAMA_EXTRA_LIBS}
-                ${FOUNDATION_LIBRARY}
-                ${METAL_FRAMEWORK}
-                ${METALKIT_FRAMEWORK}
-                ${METALPERFORMANCE_FRAMEWORK}
-            )
-        endif()
+        set(LLAMA_EXTRA_LIBS ${LLAMA_EXTRA_LIBS}
+            ${FOUNDATION_LIBRARY}
+            ${METAL_FRAMEWORK}
+            ${METALKIT_FRAMEWORK}
+            ${METALPERFORMANCE_FRAMEWORK}
+        )
     endif()
 
     add_library(ggml${SUFFIX} OBJECT
@@ -598,15 +594,14 @@ function(include_ggml DIRECTORY SUFFIX WITH_LLAMA)
                 ${DIRECTORY}/ggml.h
                 ${DIRECTORY}/ggml-alloc.c
                 ${DIRECTORY}/ggml-alloc.h
-                ${GGML_SOURCES_QUANT_K}
+                ${DIRECTORY}/ggml-backend.c
+                ${DIRECTORY}/ggml-backend.h
+                ${DIRECTORY}/ggml-quants.h
+                ${DIRECTORY}/ggml-quants.c
                 ${GGML_SOURCES_CUDA}
                 ${GGML_METAL_SOURCES}
                 ${GGML_OPENCL_SOURCES}
                 ${GGML_SOURCES_KOMPUTE})
-
-    if (LLAMA_K_QUANTS)
-        target_compile_definitions(ggml${SUFFIX} PUBLIC GGML_USE_K_QUANTS)
-    endif()
 
     if (LLAMA_METAL AND GGML_METAL_SOURCES)
         target_compile_definitions(ggml${SUFFIX} PUBLIC GGML_USE_METAL GGML_METAL_NDEBUG)
