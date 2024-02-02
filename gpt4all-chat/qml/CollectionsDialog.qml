@@ -22,9 +22,10 @@ MyDialog {
         id: listLabel
         anchors.top: parent.top
         anchors.left: parent.left
-        text: qsTr("Local Documents:")
+        text: qsTr("Local Documents")
+        color: theme.titleTextColor
         font.pixelSize: theme.fontSizeLarge
-        color: theme.textColor
+        font.bold: true
     }
 
     ScrollView {
@@ -37,21 +38,28 @@ MyDialog {
         anchors.right: parent.right
         clip: true
         contentHeight: 300
-        ScrollBar.vertical.policy: ScrollBar.AlwaysOn
+        ScrollBar.vertical.policy: ScrollBar.AlwaysOff
 
         background: Rectangle {
-            color: theme.backgroundLighter
+            color: theme.controlBackground
         }
 
         ListView {
             id: listView
             model: LocalDocs.localDocsModel
             boundsBehavior: Flickable.StopAtBounds
+            ScrollBar.vertical: ScrollBar {
+                parent: listView.parent
+                anchors.top: listView.top
+                anchors.left: listView.right
+                anchors.bottom: listView.bottom
+            }
+
             delegate: Rectangle {
                 id: item
                 width: listView.width
                 height: collectionId.height + 40
-                color: index % 2 === 0 ? theme.backgroundLight : theme.backgroundLighter
+                color: index % 2 === 0 ? theme.darkContrast : theme.lightContrast
                 MyCheckBox {
                     id: checkBox
                     anchors.verticalCenter: parent.verticalCenter
@@ -86,11 +94,13 @@ MyDialog {
                     anchors.right: parent.right
                     anchors.margins: 20
                     anchors.leftMargin: 40
-                    visible: model.indexing
-                    value: (model.totalBytesToIndex - model.currentBytesToIndex) / model.totalBytesToIndex
+                    visible: model.indexing || model.currentEmbeddingsToIndex !== model.totalEmbeddingsToIndex || model.error !== ""
+                    value: model.error !== "" ? 0 : model.indexing ?
+                        (model.totalBytesToIndex - model.currentBytesToIndex) / model.totalBytesToIndex :
+                        (model.currentEmbeddingsToIndex / model.totalEmbeddingsToIndex)
                     background: Rectangle {
                         implicitHeight: 45
-                        color: theme.backgroundDarkest
+                        color: model.error ? theme.textErrorColor : theme.progressBackground
                         radius: 3
                     }
                     contentItem: Item {
@@ -100,22 +110,24 @@ MyDialog {
                             width: itemProgressBar.visualPosition * parent.width
                             height: parent.height
                             radius: 2
-                            color: theme.assistantColor
+                            color: theme.progressForeground
                         }
                     }
                     Accessible.role: Accessible.ProgressBar
                     Accessible.name: qsTr("Indexing progressBar")
                     Accessible.description: qsTr("Shows the progress made in the indexing")
+                    ToolTip.text: model.error
+                    ToolTip.visible: hovered && model.error !== ""
                 }
                 Label {
                     id: speedLabel
                     color: theme.textColor
-                    visible: model.indexing
+                    visible: model.indexing || model.currentEmbeddingsToIndex !== model.totalEmbeddingsToIndex
                     anchors.verticalCenter: itemProgressBar.verticalCenter
                     anchors.left: itemProgressBar.left
                     anchors.right: itemProgressBar.right
                     horizontalAlignment: Text.AlignHCenter
-                    text: qsTr("indexing...")
+                    text: model.error !== "" ? qsTr("error...") : (model.indexing ? qsTr("indexing...") : qsTr("embeddings..."))
                     elide: Text.ElideRight
                     font.pixelSize: theme.fontSizeLarge
                 }
@@ -123,7 +135,7 @@ MyDialog {
         }
     }
 
-    MyButton {
+    MySettingsButton {
         id: collectionSettings
         anchors.bottom: parent.bottom
         anchors.horizontalCenter: parent.horizontalCenter

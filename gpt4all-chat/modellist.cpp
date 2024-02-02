@@ -1,6 +1,7 @@
 #include "modellist.h"
 #include "mysettings.h"
 #include "network.h"
+#include "../gpt4all-backend/llmodel.h"
 
 #include <QFile>
 #include <QStandardPaths>
@@ -9,6 +10,7 @@
 //#define USE_LOCAL_MODELSJSON
 
 #define DEFAULT_EMBEDDING_MODEL "all-MiniLM-L6-v2-f16.gguf"
+#define NOMIC_EMBEDDING_MODEL "nomic-embed-text-v1.txt"
 
 QString ModelInfo::id() const
 {
@@ -108,6 +110,41 @@ void ModelInfo::setContextLength(int l)
     m_contextLength = l;
 }
 
+int ModelInfo::maxContextLength() const
+{
+    if (m_maxContextLength != -1) return m_maxContextLength;
+    auto path = (dirpath + filename()).toStdString();
+    int layers = LLModel::Implementation::maxContextLength(path);
+    if (layers < 0) {
+        layers = 4096; // fallback value
+    }
+    m_maxContextLength = layers;
+    return m_maxContextLength;
+}
+
+int ModelInfo::gpuLayers() const
+{
+    return MySettings::globalInstance()->modelGpuLayers(*this);
+}
+
+void ModelInfo::setGpuLayers(int l)
+{
+    if (isClone) MySettings::globalInstance()->setModelGpuLayers(*this, l, isClone /*force*/);
+    m_gpuLayers = l;
+}
+
+int ModelInfo::maxGpuLayers() const
+{
+    if (m_maxGpuLayers != -1) return m_maxGpuLayers;
+    auto path = (dirpath + filename()).toStdString();
+    int layers = LLModel::Implementation::layerCount(path);
+    if (layers < 0) {
+        layers = 100; // fallback value
+    }
+    m_maxGpuLayers = layers;
+    return m_maxGpuLayers;
+}
+
 double ModelInfo::repeatPenalty() const
 {
     return MySettings::globalInstance()->modelRepeatPenalty(*this);
@@ -166,7 +203,8 @@ bool EmbeddingModels::filterAcceptsRow(int sourceRow,
 {
     QModelIndex index = sourceModel()->index(sourceRow, 0, sourceParent);
     bool isInstalled = sourceModel()->data(index, ModelList::InstalledRole).toBool();
-    bool isEmbedding = sourceModel()->data(index, ModelList::FilenameRole).toString() == DEFAULT_EMBEDDING_MODEL;
+    bool isEmbedding = sourceModel()->data(index, ModelList::FilenameRole).toString() == DEFAULT_EMBEDDING_MODEL ||
+        sourceModel()->data(index, ModelList::FilenameRole).toString() == NOMIC_EMBEDDING_MODEL;
     return isInstalled && isEmbedding;
 }
 
@@ -286,6 +324,7 @@ ModelList::ModelList()
     connect(MySettings::globalInstance(), &MySettings::maxLengthChanged, this, &ModelList::updateDataForSettings);
     connect(MySettings::globalInstance(), &MySettings::promptBatchSizeChanged, this, &ModelList::updateDataForSettings);
     connect(MySettings::globalInstance(), &MySettings::contextLengthChanged, this, &ModelList::updateDataForSettings);
+    connect(MySettings::globalInstance(), &MySettings::gpuLayersChanged, this, &ModelList::updateDataForSettings);
     connect(MySettings::globalInstance(), &MySettings::repeatPenaltyChanged, this, &ModelList::updateDataForSettings);
     connect(MySettings::globalInstance(), &MySettings::repeatPenaltyTokensChanged, this, &ModelList::updateDataForSettings);;
     connect(MySettings::globalInstance(), &MySettings::promptTemplateChanged, this, &ModelList::updateDataForSettings);
@@ -368,7 +407,7 @@ ModelInfo ModelList::defaultModelInfo() const
         const size_t ramrequired = defaultModel->ramrequired;
 
         // If we don't have either setting, then just use the first model that requires less than 16GB that is installed
-        if (!hasUserDefaultName && !info->isChatGPT && ramrequired > 0 && ramrequired < 16)
+        if (!hasUserDefaultName && !info->isOnline && ramrequired > 0 && ramrequired < 16)
             break;
 
         // If we have a user specified default and match, then use it
@@ -489,8 +528,8 @@ QVariant ModelList::dataInternal(const ModelInfo *info, int role) const
             return info->installed;
         case DefaultRole:
             return info->isDefault;
-        case ChatGPTRole:
-            return info->isChatGPT;
+        case OnlineRole:
+            return info->isOnline;
         case DisableGUIRole:
             return info->disableGUI;
         case DescriptionRole:
@@ -539,6 +578,8 @@ QVariant ModelList::dataInternal(const ModelInfo *info, int role) const
             return info->promptBatchSize();
         case ContextLengthRole:
             return info->contextLength();
+        case GpuLayersRole:
+            return info->gpuLayers();
         case RepeatPenaltyRole:
             return info->repeatPenalty();
         case RepeatPenaltyTokensRole:
@@ -616,8 +657,8 @@ void ModelList::updateData(const QString &id, int role, const QVariant &value)
             info->installed = value.toBool(); break;
         case DefaultRole:
             info->isDefault = value.toBool(); break;
-        case ChatGPTRole:
-            info->isChatGPT = value.toBool(); break;
+        case OnlineRole:
+            info->isOnline = value.toBool(); break;
         case DisableGUIRole:
             info->disableGUI = value.toBool(); break;
         case DescriptionRole:
@@ -664,6 +705,10 @@ void ModelList::updateData(const QString &id, int role, const QVariant &value)
             info->setMaxLength(value.toInt()); break;
         case PromptBatchSizeRole:
             info->setPromptBatchSize(value.toInt()); break;
+        case ContextLengthRole:
+            info->setContextLength(value.toInt()); break;
+        case GpuLayersRole:
+            info->setGpuLayers(value.toInt()); break;
         case RepeatPenaltyRole:
             info->setRepeatPenalty(value.toDouble()); break;
         case RepeatPenaltyTokensRole:
@@ -748,13 +793,14 @@ QString ModelList::clone(const ModelInfo &model)
     updateData(id, ModelList::FilenameRole, model.filename());
     updateData(id, ModelList::DirpathRole, model.dirpath);
     updateData(id, ModelList::InstalledRole, model.installed);
-    updateData(id, ModelList::ChatGPTRole, model.isChatGPT);
+    updateData(id, ModelList::OnlineRole, model.isOnline);
     updateData(id, ModelList::TemperatureRole, model.temperature());
     updateData(id, ModelList::TopPRole, model.topP());
     updateData(id, ModelList::TopKRole, model.topK());
     updateData(id, ModelList::MaxLengthRole, model.maxLength());
     updateData(id, ModelList::PromptBatchSizeRole, model.promptBatchSize());
     updateData(id, ModelList::ContextLengthRole, model.contextLength());
+    updateData(id, ModelList::GpuLayersRole, model.contextLength());
     updateData(id, ModelList::RepeatPenaltyRole, model.repeatPenalty());
     updateData(id, ModelList::RepeatPenaltyTokensRole, model.repeatPenaltyTokens());
     updateData(id, ModelList::PromptTemplateRole, model.promptTemplate());
@@ -829,10 +875,10 @@ QString ModelList::uniqueModelName(const ModelInfo &model) const
     return baseName;
 }
 
-QString ModelList::modelDirPath(const QString &modelName, bool isChatGPT)
+QString ModelList::modelDirPath(const QString &modelName, bool isOnline)
 {
     QVector<QString> possibleFilePaths;
-    if (isChatGPT)
+    if (isOnline)
         possibleFilePaths << "/" + modelName + ".txt";
     else {
         possibleFilePaths << "/ggml-" + modelName + ".bin";
@@ -867,7 +913,7 @@ void ModelList::updateModelsFromDirectory()
 
                 // All files that end with .bin and have 'ggml' somewhere in the name
                 if (((filename.endsWith(".bin") || filename.endsWith(".gguf")) && (/*filename.contains("ggml") ||*/ filename.contains("gguf")) && !filename.startsWith("incomplete"))
-                    || (filename.endsWith(".txt") && filename.startsWith("chatgpt-"))) {
+                    || (filename.endsWith(".txt") && (filename.startsWith("chatgpt-") || filename.startsWith("nomic-")))) {
 
                     QString filePath = it.filePath();
                     QFileInfo info(filePath);
@@ -890,7 +936,8 @@ void ModelList::updateModelsFromDirectory()
 
                     for (const QString &id : modelsById) {
                         updateData(id, FilenameRole, filename);
-                        updateData(id, ChatGPTRole, filename.startsWith("chatgpt-"));
+                        // FIXME: WE should change this to use a consistent filename for online models
+                        updateData(id, OnlineRole, filename.startsWith("chatgpt-") || filename.startsWith("nomic-"));
                         updateData(id, DirpathRole, info.dir().absolutePath() + "/");
                         updateData(id, FilesizeRole, toFileSize(info.size()));
                     }
@@ -1123,6 +1170,8 @@ void ModelList::parseModelsJsonFile(const QByteArray &jsonData, bool save)
             updateData(id, ModelList::PromptBatchSizeRole, obj["promptBatchSize"].toInt());
         if (obj.contains("contextLength"))
             updateData(id, ModelList::ContextLengthRole, obj["contextLength"].toInt());
+        if (obj.contains("gpuLayers"))
+            updateData(id, ModelList::GpuLayersRole, obj["gpuLayers"].toInt());
         if (obj.contains("repeatPenalty"))
             updateData(id, ModelList::RepeatPenaltyRole, obj["repeatPenalty"].toDouble());
         if (obj.contains("repeatPenaltyTokens"))
@@ -1149,7 +1198,7 @@ void ModelList::parseModelsJsonFile(const QByteArray &jsonData, bool save)
         updateData(id, ModelList::NameRole, modelName);
         updateData(id, ModelList::FilenameRole, modelFilename);
         updateData(id, ModelList::FilesizeRole, "minimal");
-        updateData(id, ModelList::ChatGPTRole, true);
+        updateData(id, ModelList::OnlineRole, true);
         updateData(id, ModelList::DescriptionRole,
             tr("<strong>OpenAI's ChatGPT model GPT-3.5 Turbo</strong><br>") + chatGPTDesc);
         updateData(id, ModelList::RequiresVersionRole, "2.4.2");
@@ -1173,7 +1222,7 @@ void ModelList::parseModelsJsonFile(const QByteArray &jsonData, bool save)
         updateData(id, ModelList::NameRole, modelName);
         updateData(id, ModelList::FilenameRole, modelFilename);
         updateData(id, ModelList::FilesizeRole, "minimal");
-        updateData(id, ModelList::ChatGPTRole, true);
+        updateData(id, ModelList::OnlineRole, true);
         updateData(id, ModelList::DescriptionRole,
             tr("<strong>OpenAI's ChatGPT model GPT-4</strong><br>") + chatGPTDesc + chatGPT4Warn);
         updateData(id, ModelList::RequiresVersionRole, "2.4.2");
@@ -1182,6 +1231,34 @@ void ModelList::parseModelsJsonFile(const QByteArray &jsonData, bool save)
         updateData(id, ModelList::ParametersRole, "?");
         updateData(id, ModelList::QuantRole, "NA");
         updateData(id, ModelList::TypeRole, "GPT");
+    }
+
+    {
+        const QString nomicEmbedDesc = tr("<ul><li>For use with LocalDocs feature</li>"
+            "<li>Used for retrieval augmented generation (RAG)</li>"
+            "<li>Requires personal Nomic API key.</li>"
+            "<li>WARNING: Will send your localdocs to Nomic Atlas!</li>"
+            "<li>You can apply for an API key <a href=\"https://atlas.nomic.ai/\">with Nomic Atlas.</a></li>");
+        const QString modelName = "Nomic Embed";
+        const QString id = modelName;
+        const QString modelFilename = "nomic-embed-text-v1.txt";
+        if (contains(modelFilename))
+            changeId(modelFilename, id);
+        if (!contains(id))
+            addModel(id);
+        updateData(id, ModelList::NameRole, modelName);
+        updateData(id, ModelList::FilenameRole, modelFilename);
+        updateData(id, ModelList::FilesizeRole, "minimal");
+        updateData(id, ModelList::OnlineRole, true);
+        updateData(id, ModelList::DisableGUIRole, true);
+        updateData(id, ModelList::DescriptionRole,
+            tr("<strong>LocalDocs Nomic Atlas Embed</strong><br>") + nomicEmbedDesc);
+        updateData(id, ModelList::RequiresVersionRole, "2.6.3");
+        updateData(id, ModelList::OrderRole, "na");
+        updateData(id, ModelList::RamrequiredRole, 0);
+        updateData(id, ModelList::ParametersRole, "?");
+        updateData(id, ModelList::QuantRole, "NA");
+        updateData(id, ModelList::TypeRole, "Bert");
     }
 }
 
@@ -1217,6 +1294,8 @@ void ModelList::updateModelsFromSettings()
         const int promptBatchSize = settings.value(g + "/promptBatchSize").toInt();
         Q_ASSERT(settings.contains(g + "/contextLength"));
         const int contextLength = settings.value(g + "/contextLength").toInt();
+        Q_ASSERT(settings.contains(g + "/gpuLayers"));
+        const int gpuLayers = settings.value(g + "/gpuLayers").toInt();
         Q_ASSERT(settings.contains(g + "/repeatPenalty"));
         const double repeatPenalty = settings.value(g + "/repeatPenalty").toDouble();
         Q_ASSERT(settings.contains(g + "/repeatPenaltyTokens"));
@@ -1236,6 +1315,7 @@ void ModelList::updateModelsFromSettings()
         updateData(id, ModelList::MaxLengthRole, maxLength);
         updateData(id, ModelList::PromptBatchSizeRole, promptBatchSize);
         updateData(id, ModelList::ContextLengthRole, contextLength);
+        updateData(id, ModelList::GpuLayersRole, gpuLayers);
         updateData(id, ModelList::RepeatPenaltyRole, repeatPenalty);
         updateData(id, ModelList::RepeatPenaltyTokensRole, repeatPenaltyTokens);
         updateData(id, ModelList::PromptTemplateRole, promptTemplate);

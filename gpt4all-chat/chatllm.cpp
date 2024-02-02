@@ -156,7 +156,7 @@ bool ChatLLM::loadModel(const ModelInfo &modelInfo)
     if (isModelLoaded() && this->modelInfo() == modelInfo)
         return true;
 
-    bool isChatGPT = modelInfo.isChatGPT;
+    bool isChatGPT = modelInfo.isOnline; // right now only chatgpt is offered for online chat models...
     QString filePath = modelInfo.dirpath + modelInfo.filename();
     QFileInfo fileInfo(filePath);
 
@@ -228,6 +228,7 @@ bool ChatLLM::loadModel(const ModelInfo &modelInfo)
             LLModelStore::globalInstance()->releaseModel(m_llModelInfo); // release back into the store
         m_llModelInfo = LLModelInfo();
         emit modelLoadingError(QString("Previous attempt to load model resulted in crash for `%1` most likely due to insufficient memory. You should either remove this model or decrease your system RAM usage by closing other applications.").arg(modelInfo.filename()));
+        return false;
     }
 
     if (fileInfo.exists()) {
@@ -247,10 +248,9 @@ bool ChatLLM::loadModel(const ModelInfo &modelInfo)
             model->setAPIKey(apiKey);
             m_llModelInfo.model = model;
         } else {
-
-            // TODO: make configurable in UI
             auto n_ctx = MySettings::globalInstance()->modelContextLength(modelInfo);
             m_ctx.n_ctx = n_ctx;
+            auto ngl = MySettings::globalInstance()->modelGpuLayers(modelInfo);
 
             std::string buildVariant = "auto";
 #if defined(Q_OS_MAC) && defined(__arm__)
@@ -269,7 +269,7 @@ bool ChatLLM::loadModel(const ModelInfo &modelInfo)
                 if (requestedDevice == "CPU") {
                     emit reportFallbackReason(""); // fallback not applicable
                 } else {
-                    const size_t requiredMemory = m_llModelInfo.model->requiredMem(filePath.toStdString(), n_ctx);
+                    const size_t requiredMemory = m_llModelInfo.model->requiredMem(filePath.toStdString(), n_ctx, ngl);
                     std::vector<LLModel::GPUDevice> availableDevices = m_llModelInfo.model->availableGPUDevices(requiredMemory);
                     LLModel::GPUDevice *device = nullptr;
 
@@ -288,7 +288,7 @@ bool ChatLLM::loadModel(const ModelInfo &modelInfo)
                     std::string unavail_reason;
                     if (!device) {
                         // GPU not available
-                    } else if (!m_llModelInfo.model->initializeGPUDevice(*device, &unavail_reason)) {
+                    } else if (!m_llModelInfo.model->initializeGPUDevice(device->index, &unavail_reason)) {
                         emit reportFallbackReason(QString::fromStdString("<br>" + unavail_reason));
                     } else {
                         actualDevice = QString::fromStdString(device->name);
@@ -298,14 +298,14 @@ bool ChatLLM::loadModel(const ModelInfo &modelInfo)
                 // Report which device we're actually using
                 emit reportDevice(actualDevice);
 
-                bool success = m_llModelInfo.model->loadModel(filePath.toStdString(), n_ctx);
+                bool success = m_llModelInfo.model->loadModel(filePath.toStdString(), n_ctx, ngl);
                 if (actualDevice == "CPU") {
                     // we asked llama.cpp to use the CPU
                 } else if (!success) {
                     // llama_init_from_file returned nullptr
                     emit reportDevice("CPU");
                     emit reportFallbackReason("<br>GPU loading failed (out of VRAM?)");
-                    success = m_llModelInfo.model->loadModel(filePath.toStdString(), n_ctx);
+                    success = m_llModelInfo.model->loadModel(filePath.toStdString(), n_ctx, 0);
                 } else if (!m_llModelInfo.model->usingGPUDevice()) {
                     // ggml_vk_init was not called in llama.cpp
                     // We might have had to fallback to CPU after load if the model is not possible to accelerate
@@ -794,7 +794,7 @@ bool ChatLLM::serialize(QDataStream &stream, int version, bool serializeKV)
         stream << responseLogits;
     }
     stream << m_ctx.n_past;
-    if (version >= 6) {
+    if (version >= 7) {
         stream << m_ctx.n_ctx;
     }
     stream << quint64(m_ctx.logits.size());
@@ -846,7 +846,7 @@ bool ChatLLM::deserialize(QDataStream &stream, int version, bool deserializeKV, 
     stream >> n_past;
     if (!discardKV) m_ctx.n_past = n_past;
 
-    if (version >= 6) {
+    if (version >= 7) {
         uint32_t n_ctx;
         stream >> n_ctx;
         if (!discardKV) m_ctx.n_ctx = n_ctx;
