@@ -64,6 +64,7 @@ static int llama_sample_top_p_top_k(
         int last_n_tokens_size,
         int top_k,
         float top_p,
+        float min_p,
         float temp,
         float repeat_penalty,
         int32_t pos) {
@@ -83,6 +84,7 @@ static int llama_sample_top_p_top_k(
     llama_sample_tail_free(ctx, &candidates_p, 1.0f, 1);
     llama_sample_typical(ctx, &candidates_p, 1.0f, 1);
     llama_sample_top_p(ctx, &candidates_p, top_p, 1);
+    llama_sample_min_p(ctx, &candidates_p, min_p, 1);
     llama_sample_temp(ctx, &candidates_p, temp);
     return llama_sample_token(ctx, &candidates_p);
 }
@@ -260,7 +262,14 @@ bool LLamaModel::loadModel(const std::string &modelPath, int n_ctx, int ngl)
     d_ptr->model_params.progress_callback = &LLModel::staticProgressCallback;
     d_ptr->model_params.progress_callback_user_data = this;
 
-#ifdef GGML_USE_METAL
+#ifdef GGML_USE_KOMPUTE
+    if (d_ptr->device != -1) {
+        d_ptr->model_params.main_gpu = d_ptr->device;
+        d_ptr->model_params.n_gpu_layers = ngl;
+    }
+#elif defined(GGML_USE_METAL)
+    (void)ngl;
+
     if (llama_verbose()) {
         std::cerr << "llama.cpp: using Metal" << std::endl;
     }
@@ -268,11 +277,8 @@ bool LLamaModel::loadModel(const std::string &modelPath, int n_ctx, int ngl)
     // always fully offload on Metal
     // TODO(cebtenzzre): use this parameter to allow using more than 53% of system RAM to load a model
     d_ptr->model_params.n_gpu_layers = 100;
-#elif defined(GGML_USE_KOMPUTE)
-    if (d_ptr->device != -1) {
-        d_ptr->model_params.main_gpu = d_ptr->device;
-        d_ptr->model_params.n_gpu_layers = ngl;
-    }
+#else
+    (void)ngl;
 #endif
 
     d_ptr->model = llama_load_model_from_file_gpt4all(modelPath.c_str(), &d_ptr->model_params);
@@ -388,7 +394,7 @@ LLModel::Token LLamaModel::sampleToken(PromptContext &promptCtx) const
     const size_t n_prev_toks = std::min((size_t) promptCtx.repeat_last_n, promptCtx.tokens.size());
     return llama_sample_top_p_top_k(d_ptr->ctx,
         promptCtx.tokens.data() + promptCtx.tokens.size() - n_prev_toks,
-        n_prev_toks, promptCtx.top_k, promptCtx.top_p, promptCtx.temp,
+        n_prev_toks, promptCtx.top_k, promptCtx.top_p, promptCtx.min_p, promptCtx.temp,
         promptCtx.repeat_penalty, promptCtx.n_last_batch_tokens - 1);
 }
 
@@ -469,6 +475,7 @@ std::vector<LLModel::GPUDevice> LLamaModel::availableGPUDevices(size_t memoryReq
         return devices;
     }
 #else
+    (void)memoryRequired;
     std::cerr << __func__ << ": built without Kompute\n";
 #endif
 
