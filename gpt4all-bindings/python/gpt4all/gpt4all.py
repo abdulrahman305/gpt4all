@@ -24,7 +24,7 @@ DEFAULT_MODEL_DIRECTORY = os.path.join(str(Path.home()), ".cache", "gpt4all").re
 
 DEFAULT_MODEL_CONFIG = {
     "systemPrompt": "",
-    "promptTemplate": "### Human: \n{0}\n### Assistant:\n",
+    "promptTemplate": "### Human: \n{0}\n\n### Assistant:\n",
 }
 
 ConfigType = Dict[str, str]
@@ -158,9 +158,8 @@ class GPT4All:
                 if model_filename == m["filename"]:
                     config.update(m)
                     config["systemPrompt"] = config["systemPrompt"].strip()
-                    config["promptTemplate"] = config["promptTemplate"].replace(
-                        "%1", "{0}", 1
-                    )  # change to Python-style formatting
+                    # change to Python-style formatting
+                    config["promptTemplate"] = config["promptTemplate"].replace("%1", "{0}", 1).replace("%2", "{1}", 1)
                     break
 
         # Validate download directory
@@ -340,12 +339,14 @@ class GPT4All:
             generate_kwargs["reset_context"] = reset
             self.current_chat_session.append({"role": "user", "content": prompt})
 
-            if self._format_chat_prompt_template.__func__ is GPT4All._format_chat_prompt_template:
+            fct_func = self._format_chat_prompt_template.__func__  # type: ignore[attr-defined]
+            if fct_func is GPT4All._format_chat_prompt_template:
                 if reset:
                     # ingest system prompt
                     self.model.prompt_model(self.current_chat_session[0]["content"], "%1",
+                                            _pyllmodel.empty_response_callback,
                                             n_batch=n_batch, n_predict=0, special=True)
-                prompt_template = self._current_prompt_template.format("%1")
+                prompt_template = self._current_prompt_template.format("%1", "%2")
             else:
                 warnings.warn(
                     "_format_chat_prompt_template is deprecated. Please use a chat session with a prompt template.",

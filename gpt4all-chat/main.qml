@@ -93,6 +93,9 @@ Window {
             if (currentChat.modelLoadingError !== "")
                 modelLoadingErrorPopup.open()
         }
+        function onModelLoadingWarning(warning) {
+            modelLoadingWarningPopup.open_(warning)
+        }
     }
 
     property bool hasShownModelDownload: false
@@ -211,6 +214,15 @@ Window {
             + "<li>If you've sideloaded the model ensure the file is not corrupt by checking md5sum"
             + "<li>Read more about what models are supported in our <a href=\"https://docs.gpt4all.io/gpt4all_chat.html\">documentation</a> for the gui"
             + "<li>Check out our <a href=\"https://discord.gg/4M2QFmTt2k\">discord channel</a> for help")
+    }
+
+    PopupDialog {
+        id: modelLoadingWarningPopup
+        property string message
+        anchors.centerIn: parent
+        shouldTimeOut: false
+        text: qsTr("<h3>Warning</h3><p>%1</p>").arg(message)
+        function open_(msg) { message = msg; open(); }
     }
 
     Rectangle {
@@ -1045,6 +1057,32 @@ Window {
                             }
                         }
 
+                        MouseArea {
+                            id: conversationMouseArea
+                            anchors.fill: parent
+                            acceptedButtons: Qt.RightButton
+
+                            onClicked: {
+                                if (mouse.button === Qt.RightButton) {
+                                    conversationContextMenu.x = conversationMouseArea.mouseX
+                                    conversationContextMenu.y = conversationMouseArea.mouseY
+                                    conversationContextMenu.open()
+                                }
+                            }
+                        }
+
+                        Menu {
+                            id: conversationContextMenu
+                            MenuItem {
+                                text: qsTr("Copy")
+                                onTriggered: myTextArea.copy()
+                            }
+                            MenuItem {
+                                text: qsTr("Select All")
+                                onTriggered: myTextArea.selectAll()
+                            }
+                        }
+
                         ResponseText {
                             id: responseText
                         }
@@ -1387,6 +1425,41 @@ Window {
                                MySettings.repeatPenaltyTokens)
                     textInput.text = ""
                 }
+
+                MouseArea {
+                    id: textInputMouseArea
+                    anchors.fill: parent
+                    acceptedButtons: Qt.RightButton
+
+                    onClicked: {
+                        if (mouse.button === Qt.RightButton) {
+                            textInputContextMenu.x = textInputMouseArea.mouseX
+                            textInputContextMenu.y = textInputMouseArea.mouseY
+                            textInputContextMenu.open()
+                        }
+                    }
+                }
+
+                Menu {
+                    id: textInputContextMenu
+                    MenuItem {
+                        text: qsTr("Cut")
+                        onTriggered: textInput.cut()
+                    }
+                    MenuItem {
+                        text: qsTr("Copy")
+                        onTriggered: textInput.copy()
+                    }
+                    MenuItem {
+                        text: qsTr("Paste")
+                        onTriggered: textInput.paste()
+                    }
+                    MenuItem {
+                        text: qsTr("Select All")
+                        onTriggered: textInput.selectAll()
+                    }
+                }
+
             }
         }
 

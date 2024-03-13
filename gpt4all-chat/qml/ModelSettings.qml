@@ -5,6 +5,7 @@ import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import modellist
 import mysettings
+import chatlistmodel
 
 MySettingsTab {
     onRestoreDefaultsClicked: {
@@ -42,7 +43,12 @@ MySettingsTab {
                 model: ModelList.installedModels
                 valueRole: "id"
                 textRole: "name"
-                currentIndex: 0
+                currentIndex: {
+                    var i = comboBox.indexOfValue(ChatListModel.currentChat.modelInfo.id);
+                    if (i >= 0)
+                        return i;
+                    return 0;
+                }
                 contentItem: Text {
                     leftPadding: 10
                     rightPadding: 20
@@ -82,7 +88,7 @@ MySettingsTab {
                 enabled: root.currentModelInfo.isClone
                 text: qsTr("Remove")
                 onClicked: {
-                    ModelList.remove(root.currentModelInfo);
+                    ModelList.removeClone(root.currentModelInfo);
                     comboBox.currentIndex = 0;
                 }
             }
@@ -453,7 +459,7 @@ MySettingsTab {
                 Accessible.description: ToolTip.text
             }
             MySettingsLabel {
-                id: minPLabel 
+                id: minPLabel
                 text: qsTr("Min P")
                 Layout.row: 3
                 Layout.column: 0
