@@ -48,9 +48,9 @@ struct llmodel_prompt_context {
 };
 
 struct llmodel_gpu_device {
-    int index = 0;
-    int type = 0;           // same as VkPhysicalDeviceType
-    size_t heapSize = 0;
+    int index;
+    int type; // same as VkPhysicalDeviceType
+    size_t heapSize;
     const char * name;
     const char * vendor;
 };
@@ -193,6 +193,7 @@ void llmodel_prompt(llmodel_model model, const char *prompt,
  * @param prefix The model-specific prefix representing the embedding task, without the trailing colon. NULL for no
  * prefix.
  * @param dimensionality The embedding dimension, for use with Matryoshka-capable models. Set to -1 to for full-size.
+ * @param token_count Return location for the number of prompt tokens processed, or NULL.
  * @param do_mean True to average multiple embeddings if the text is longer than the model can accept, False to
  * truncate.
  * @param atlas Try to be fully compatible with the Atlas API. Currently, this means texts longer than 8192 tokens with
@@ -202,7 +203,7 @@ void llmodel_prompt(llmodel_model model, const char *prompt,
  * be responsible for lifetime of this memory. NULL if an error occurred.
  */
 float *llmodel_embed(llmodel_model model, const char **texts, size_t *embedding_size, const char *prefix,
-                     int dimensionality, bool do_mean, bool atlas, const char **error);
+                     int dimensionality, size_t *token_count, bool do_mean, bool atlas, const char **error);
 
 /**
  * Frees the memory allocated by the llmodel_embedding function.
@@ -240,9 +241,10 @@ const char *llmodel_get_implementation_search_path();
 
 /**
  * Get a list of available GPU devices given the memory required.
+ * @param memoryRequired The minimum amount of VRAM, in bytes
  * @return A pointer to an array of llmodel_gpu_device's whose number is given by num_devices.
  */
-struct llmodel_gpu_device* llmodel_available_gpu_devices(llmodel_model model, size_t memoryRequired, int* num_devices);
+struct llmodel_gpu_device* llmodel_available_gpu_devices(size_t memoryRequired, int* num_devices);
 
 /**
  * Initializes a GPU device based on a specified string criterion.

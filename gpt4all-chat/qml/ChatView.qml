@@ -21,6 +21,8 @@ Rectangle {
 
     property var currentChat: ChatListModel.currentChat
     property var chatModel: currentChat.chatModel
+    signal settingsViewRequested(int page)
+    signal downloadViewRequested(bool showEmbeddingModels)
 
     color: theme.black
 
@@ -31,13 +33,6 @@ Rectangle {
 
     Connections {
         target: firstStartDialog
-        function onClosed() {
-            startupDialogs();
-        }
-    }
-
-    Connections {
-        target: downloadNewModels
         function onClosed() {
             startupDialogs();
         }
@@ -90,15 +85,15 @@ Rectangle {
             return;
         }
 
-        // check for any current models and if not, open download dialog once
+        // check for any current models and if not, open download view once
         if (!hasShownModelDownload && ModelList.installedModels.count === 0 && !firstStartDialog.opened) {
-            downloadNewModels.open();
+            downloadViewRequested();
             hasShownModelDownload = true;
             return;
         }
 
         // check for new version
-        if (Download.hasNewerRelease && !firstStartDialog.opened && !downloadNewModels.opened) {
+        if (Download.hasNewerRelease && !firstStartDialog.opened) {
             newVersionDialog.open();
             return;
         }
@@ -151,13 +146,6 @@ Rectangle {
     NewVersionDialog {
         id: newVersionDialog
         anchors.centerIn: parent
-    }
-
-    AboutDialog {
-        id: aboutDialog
-        anchors.centerIn: parent
-        width: Math.min(1024, window.width - (window.width * .2))
-        height: Math.min(600, window.height - (window.height * .2))
     }
 
     Item {
@@ -294,262 +282,262 @@ Rectangle {
         anchors.top: parent.top
         height: 100
         color: theme.mainHeader
-        Item {
-            anchors.centerIn: parent
-            height: childrenRect.height
-            visible: true
 
-            Label {
-                id: modelLabel
-                color: theme.textColor
-                padding: 20
-                font.pixelSize: theme.fontSizeLarger
-                text: ""
-                background: Rectangle {
-                    color: theme.mainHeader
+        RowLayout {
+            id: comboLayout
+            height: 80
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: 20
+
+            Rectangle {
+                Layout.alignment: Qt.AlignLeft
+                Layout.leftMargin: 30
+                Layout.fillWidth: true
+                Layout.preferredWidth: 100
+                Layout.topMargin: 20
+                color: "transparent"
+                Layout.preferredHeight: childrenRect.height
+                MyToolButton {
+                    id: drawerButton
+                    anchors.left: parent.left
+                    backgroundColor: theme.iconBackgroundLight
+                    width: 40
+                    height: 40
+                    scale: 1.5
+                    padding: 15
+                    source: conversation.state === "expanded" ? "qrc:/gpt4all/icons/left_panel_open.svg" : "qrc:/gpt4all/icons/left_panel_closed.svg"
+                    Accessible.role: Accessible.ButtonMenu
+                    Accessible.name: qsTr("Chat panel")
+                    Accessible.description: qsTr("Chat panel with options")
+                    onClicked: {
+                        conversation.toggleLeftPanel()
+                    }
                 }
-                horizontalAlignment: TextInput.AlignRight
             }
 
-            RowLayout {
-                id: comboLayout
-                anchors.top: modelLabel.top
-                anchors.bottom: modelLabel.bottom
-                anchors.horizontalCenter: parent.horizontalCenter
-                anchors.horizontalCenterOffset: window.width >= 950 ? 0 : Math.max(-((950 - window.width) / 2), -99.5)
-                spacing: 20
+            MyComboBox {
+                id: comboBox
+                Layout.alignment: Qt.AlignHCenter
+                Layout.fillHeight: true
+                Layout.fillWidth: true
+                Layout.preferredWidth: 100
+                Layout.maximumWidth: 675
+                enabled: !currentChat.isServer
+                    && !window.trySwitchContextInProgress
+                    && !window.isCurrentlyLoading
+                model: ModelList.installedModels
+                valueRole: "id"
+                textRole: "name"
 
-                MyComboBox {
-                    id: comboBox
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
-                    implicitWidth: 575
-                    width: window.width >= 750 ? implicitWidth : implicitWidth - (750 - window.width)
-                    enabled: !currentChat.isServer
+                function changeModel(index) {
+                    window.modelLoadingPercentage = 0.0;
+                    window.isCurrentlyLoading = true;
+                    currentChat.stopGenerating()
+                    currentChat.reset();
+                    currentChat.modelInfo = ModelList.modelInfo(comboBox.valueAt(index))
+                }
+
+                Connections {
+                    target: currentChat
+                    function onModelLoadingPercentageChanged() {
+                        window.modelLoadingPercentage = currentChat.modelLoadingPercentage;
+                        window.isCurrentlyLoading = currentChat.modelLoadingPercentage !== 0.0
+                            && currentChat.modelLoadingPercentage !== 1.0;
+                    }
+                    function onTrySwitchContextOfLoadedModelAttempted() {
+                        window.trySwitchContextInProgress = true;
+                    }
+                    function onTrySwitchContextOfLoadedModelCompleted() {
+                        window.trySwitchContextInProgress = false;
+                    }
+                }
+                Connections {
+                    target: switchModelDialog
+                    function onAccepted() {
+                        comboBox.changeModel(switchModelDialog.index)
+                    }
+                }
+
+                background: ProgressBar {
+                    id: modelProgress
+                    value: window.modelLoadingPercentage
+                    background: Rectangle {
+                        color: theme.mainComboBackground
+                        radius: 10
+                    }
+                    contentItem: Item {
+                        Rectangle {
+                            visible: window.isCurrentlyLoading
+                            anchors.bottom: parent.bottom
+                            width: modelProgress.visualPosition * parent.width
+                            height: 10
+                            radius: 2
+                            color: theme.progressForeground
+                        }
+                    }
+                }
+                contentItem: Text {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    leftPadding: 10
+                    rightPadding: {
+                        if (ejectButton.visible && reloadButton)
+                            return 105;
+                        if (reloadButton.visible)
+                            return 65
+                        return 25
+                    }
+                    text: {
+                        if (currentChat.modelLoadingError !== "")
+                            return qsTr("Model loading error...")
+                        if (window.trySwitchContextInProgress)
+                            return qsTr("Switching context...")
+                        if (currentModelName() === "")
+                            return qsTr("Choose a model...")
+                        if (currentChat.modelLoadingPercentage === 0.0)
+                            return qsTr("Reload \u00B7 ") + currentModelName()
+                        if (window.isCurrentlyLoading)
+                            return qsTr("Loading \u00B7 ") + currentModelName()
+                        return currentModelName()
+                    }
+                    font.pixelSize: theme.fontSizeLarger
+                    color: theme.white
+                    verticalAlignment: Text.AlignVCenter
+                    horizontalAlignment: Text.AlignHCenter
+                    elide: Text.ElideRight
+                }
+                delegate: ItemDelegate {
+                    id: comboItemDelegate
+                    width: comboBox.width
+                    contentItem: Text {
+                        text: name
+                        color: theme.textColor
+                        font: comboBox.font
+                        elide: Text.ElideRight
+                        verticalAlignment: Text.AlignVCenter
+                    }
+                    background: Rectangle {
+                        color: (index % 2 === 0 ? theme.darkContrast : theme.lightContrast)
+                        border.width: highlighted
+                        border.color: theme.accentColor
+                    }
+                    highlighted: comboBox.highlightedIndex === index
+                }
+                Accessible.role: Accessible.ComboBox
+                Accessible.name: currentModelName()
+                Accessible.description: qsTr("The top item is the current model")
+                onActivated: function (index) {
+                    var newInfo = ModelList.modelInfo(comboBox.valueAt(index));
+                    if (newInfo === currentChat.modelInfo) {
+                        currentChat.reloadModel();
+                    } else if (currentModelName() !== "" && chatModel.count !== 0) {
+                        switchModelDialog.index = index;
+                        switchModelDialog.open();
+                    } else {
+                        comboBox.changeModel(index);
+                    }
+                }
+
+                MyMiniButton {
+                    id: ejectButton
+                    visible: currentChat.isModelLoaded && !window.isCurrentlyLoading
+                    z: 500
+                    anchors.right: parent.right
+                    anchors.rightMargin: 50
+                    anchors.verticalCenter: parent.verticalCenter
+                    source: "qrc:/gpt4all/icons/eject.svg"
+                    backgroundColor: theme.gray300
+                    backgroundColorHovered: theme.iconBackgroundLight
+                    onClicked: {
+                        currentChat.forceUnloadModel();
+                    }
+                    ToolTip.text: qsTr("Eject the currently loaded model")
+                    ToolTip.visible: hovered
+                }
+
+                MyMiniButton {
+                    id: reloadButton
+                    visible: currentChat.modelLoadingError === ""
                         && !window.trySwitchContextInProgress
                         && !window.isCurrentlyLoading
-                    model: ModelList.installedModels
-                    valueRole: "id"
-                    textRole: "name"
-
-                    function changeModel(index) {
-                        window.modelLoadingPercentage = 0.0;
-                        window.isCurrentlyLoading = true;
-                        currentChat.stopGenerating()
-                        currentChat.reset();
-                        currentChat.modelInfo = ModelList.modelInfo(comboBox.valueAt(index))
-                    }
-
-                    Connections {
-                        target: currentChat
-                        function onModelLoadingPercentageChanged() {
-                            window.modelLoadingPercentage = currentChat.modelLoadingPercentage;
-                            window.isCurrentlyLoading = currentChat.modelLoadingPercentage !== 0.0
-                                && currentChat.modelLoadingPercentage !== 1.0;
-                        }
-                        function onTrySwitchContextOfLoadedModelAttempted() {
-                            window.trySwitchContextInProgress = true;
-                        }
-                        function onTrySwitchContextOfLoadedModelCompleted() {
-                            window.trySwitchContextInProgress = false;
-                        }
-                    }
-                    Connections {
-                        target: switchModelDialog
-                        function onAccepted() {
-                            comboBox.changeModel(switchModelDialog.index)
-                        }
-                    }
-
-                    background: ProgressBar {
-                        id: modelProgress
-                        value: window.modelLoadingPercentage
-                        background: Rectangle {
-                            color: theme.mainComboBackground
-                            radius: 10
-                        }
-                        contentItem: Item {
-                            Rectangle {
-                                visible: window.isCurrentlyLoading
-                                anchors.bottom: parent.bottom
-                                width: modelProgress.visualPosition * parent.width
-                                height: 10
-                                radius: 2
-                                color: theme.progressForeground
-                            }
-                        }
-                    }
-                    contentItem: Text {
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        leftPadding: 10
-                        rightPadding: {
-                            if (ejectButton.visible && reloadButton)
-                                return 105;
-                            if (reloadButton.visible)
-                                return 65
-                            return 25
-                        }
-                        text: {
-                            if (currentChat.modelLoadingError !== "")
-                                return qsTr("Model loading error...")
-                            if (window.trySwitchContextInProgress)
-                                return qsTr("Switching context...")
-                            if (currentModelName() === "")
-                                return qsTr("Choose a model...")
-                            if (currentChat.modelLoadingPercentage === 0.0)
-                                return qsTr("Reload \u00B7 ") + currentModelName()
-                            if (window.isCurrentlyLoading)
-                                return qsTr("Loading \u00B7 ") + currentModelName()
-                            return currentModelName()
-                        }
-                        font.pixelSize: theme.fontSizeLarger
-                        color: theme.white
-                        verticalAlignment: Text.AlignVCenter
-                        horizontalAlignment: Text.AlignHCenter
-                        elide: Text.ElideRight
-                    }
-                    delegate: ItemDelegate {
-                        id: comboItemDelegate
-                        width: comboBox.width
-                        contentItem: Text {
-                            text: name
-                            color: theme.textColor
-                            font: comboBox.font
-                            elide: Text.ElideRight
-                            verticalAlignment: Text.AlignVCenter
-                        }
-                        background: Rectangle {
-                            color: (index % 2 === 0 ? theme.darkContrast : theme.lightContrast)
-                            border.width: highlighted
-                            border.color: theme.accentColor
-                        }
-                        highlighted: comboBox.highlightedIndex === index
-                    }
-                    Accessible.role: Accessible.ComboBox
-                    Accessible.name: currentModelName()
-                    Accessible.description: qsTr("The top item is the current model")
-                    onActivated: function (index) {
-                        var newInfo = ModelList.modelInfo(comboBox.valueAt(index));
-                        if (newInfo === currentChat.modelInfo) {
+                        && (currentChat.isModelLoaded || currentModelName() !== "")
+                    z: 500
+                    anchors.right: ejectButton.visible ? ejectButton.left : parent.right
+                    anchors.rightMargin: ejectButton.visible ? 10 : 50
+                    anchors.verticalCenter: parent.verticalCenter
+                    source: "qrc:/gpt4all/icons/regenerate.svg"
+                    backgroundColor: theme.gray300
+                    backgroundColorHovered: theme.iconBackgroundLight
+                    onClicked: {
+                        if (currentChat.isModelLoaded)
+                            currentChat.forceReloadModel();
+                        else
                             currentChat.reloadModel();
-                        } else if (currentModelName() !== "" && chatModel.count !== 0) {
-                            switchModelDialog.index = index;
-                            switchModelDialog.open();
-                        } else {
-                            comboBox.changeModel(index);
-                        }
                     }
+                    ToolTip.text: qsTr("Reload the currently loaded model")
+                    ToolTip.visible: hovered
+                }
+            }
 
-                    MyMiniButton {
-                        id: ejectButton
-                        visible: currentChat.isModelLoaded && !window.isCurrentlyLoading
-                        z: 500
-                        anchors.right: parent.right
-                        anchors.rightMargin: 50
-                        anchors.verticalCenter: parent.verticalCenter
-                        source: "qrc:/gpt4all/icons/eject.svg"
-                        backgroundColor: theme.gray300
-                        backgroundColorHovered: theme.iconBackgroundLight
-                        onClicked: {
-                            currentChat.forceUnloadModel();
-                        }
-                        ToolTip.text: qsTr("Eject the currently loaded model")
-                        ToolTip.visible: hovered
-                    }
+            Rectangle {
+                color: "transparent"
+                Layout.alignment: Qt.AlignRight
+                Layout.rightMargin: 30
+                Layout.fillWidth: true
+                Layout.preferredWidth: 100
+                Layout.preferredHeight: childrenRect.height
+                Layout.topMargin: 20
 
-                    MyMiniButton {
-                        id: reloadButton
-                        visible: currentChat.modelLoadingError === ""
-                            && !window.trySwitchContextInProgress
-                            && !window.isCurrentlyLoading
-                            && (currentChat.isModelLoaded || currentModelName() !== "")
-                        z: 500
-                        anchors.right: ejectButton.visible ? ejectButton.left : parent.right
-                        anchors.rightMargin: ejectButton.visible ? 10 : 50
-                        anchors.verticalCenter: parent.verticalCenter
-                        source: "qrc:/gpt4all/icons/regenerate.svg"
-                        backgroundColor: theme.gray300
-                        backgroundColorHovered: theme.iconBackgroundLight
-                        onClicked: {
-                            if (currentChat.isModelLoaded)
-                                currentChat.forceReloadModel();
-                            else
-                                currentChat.reloadModel();
+                RowLayout {
+                    spacing: 20
+                    anchors.right: parent.right
+                    MyButton {
+                        id: collectionsButton
+                        Image {
+                            id: collectionsImage
+                            anchors.verticalCenter: parent.verticalCenter
+                            anchors.left: parent.left
+                            anchors.leftMargin: 15
+                            width: 24
+                            height: 24
+                            mipmap: true
+                            source: "qrc:/gpt4all/icons/db.svg"
                         }
-                        ToolTip.text: qsTr("Reload the currently loaded model")
-                        ToolTip.visible: hovered
+
+                        ColorOverlay {
+                            anchors.fill: collectionsImage
+                            source: collectionsImage
+                            color: collectionsButton.hovered || collectionsImage.toggled ? theme.iconBackgroundHovered : theme.iconBackgroundLight
+                        }
+
+                        leftPadding: 50
+                        borderWidth: 0
+                        backgroundColor: theme.mainComboBackground
+                        backgroundColorHovered: theme.conversationButtonBackgroundHovered
+                        backgroundRadius: 5
+                        padding: 15
+                        topPadding: 8
+                        bottomPadding: 8
+                        textColor: hovered || toggled ? theme.iconBackgroundHovered : theme.iconBackgroundLight
+                        text: qsTr("LocalDocs")
+                        fontPixelSize: theme.fontSizeSmall
+
+                        property bool toggled: currentChat.collectionList.length
+                        background: Rectangle {
+                            radius: collectionsButton.backgroundRadius
+                            color: collectionsButton.toggled ? collectionsButton.backgroundColorHovered : collectionsButton.backgroundColor
+                        }
+
+                        Accessible.name: qsTr("Add documents")
+                        Accessible.description: qsTr("add collections of documents to the chat")
+
+                        onClicked: {
+                            collectionsDialog.open()
+                        }
                     }
                 }
             }
-        }
-    }
-
-    SettingsDialog {
-        id: settingsDialog
-        anchors.centerIn: parent
-        width: Math.min(1920, window.width - (window.width * .1))
-        height: window.height - (window.height * .1)
-        onDownloadClicked: {
-            downloadNewModels.showEmbeddingModels = true
-            downloadNewModels.open()
-        }
-    }
-
-    MyToolButton {
-        id: drawerButton
-        backgroundColor: theme.iconBackgroundLight
-        anchors.left: parent.left
-        anchors.top: parent.top
-        anchors.topMargin: 42.5
-        anchors.leftMargin: 30
-        width: 40
-        height: 40
-        scale: 1.5
-        z: 200
-        padding: 15
-        source: conversation.state === "expanded" ? "qrc:/gpt4all/icons/left_panel_open.svg" : "qrc:/gpt4all/icons/left_panel_closed.svg"
-        Accessible.role: Accessible.ButtonMenu
-        Accessible.name: qsTr("Chat panel")
-        Accessible.description: qsTr("Chat panel with options")
-        onClicked: {
-            conversation.toggleLeftPanel()
-        }
-    }
-
-    NetworkDialog {
-        id: networkDialog
-        anchors.centerIn: parent
-        width: Math.min(1024, window.width - (window.width * .2))
-        height: Math.min(600, window.height - (window.height * .2))
-        Item {
-            Accessible.role: Accessible.Dialog
-            Accessible.name: qsTr("Network dialog")
-            Accessible.description: qsTr("opt-in to share feedback/conversations")
-        }
-    }
-
-    MyToolButton {
-        id: networkButton
-        backgroundColor: theme.iconBackgroundLight
-        anchors.right: parent.right
-        anchors.top: parent.top
-        anchors.topMargin: 42.5
-        anchors.rightMargin: 30
-        width: 40
-        height: 40
-        z: 200
-        padding: 15
-        toggled: MySettings.networkIsActive
-        source: "qrc:/gpt4all/icons/network.svg"
-        Accessible.name: qsTr("Network")
-        Accessible.description: qsTr("Reveals a dialogue where you can opt-in for sharing data over network")
-
-        onClicked: {
-            if (MySettings.networkIsActive) {
-                MySettings.networkIsActive = false
-                Network.sendNetworkToggled(false);
-            } else
-                networkDialog.open()
         }
     }
 
@@ -564,49 +552,7 @@ Rectangle {
         id: collectionsDialog
         anchors.centerIn: parent
         onAddRemoveClicked: {
-            settingsDialog.pageToDisplay = 2;
-            settingsDialog.open();
-        }
-    }
-
-    MyToolButton {
-        id: collectionsButton
-        backgroundColor: theme.iconBackgroundLight
-        anchors.right: networkButton.left
-        anchors.top: parent.top
-        anchors.topMargin: 42.5
-        anchors.rightMargin: 10
-        width: 40
-        height: 42.5
-        z: 200
-        padding: 15
-        toggled: currentChat.collectionList.length
-        source: "qrc:/gpt4all/icons/db.svg"
-        Accessible.name: qsTr("Add documents")
-        Accessible.description: qsTr("add collections of documents to the chat")
-
-        onClicked: {
-            collectionsDialog.open()
-        }
-    }
-
-    MyToolButton {
-        id: settingsButton
-        backgroundColor: theme.iconBackgroundLight
-        anchors.right: collectionsButton.left
-        anchors.top: parent.top
-        anchors.topMargin: 42.5
-        anchors.rightMargin: 10
-        width: 40
-        height: 40
-        z: 200
-        padding: 15
-        source: "qrc:/gpt4all/icons/settings.svg"
-        Accessible.name: qsTr("Settings")
-        Accessible.description: qsTr("Reveals a dialogue with settings")
-
-        onClicked: {
-            settingsDialog.open()
+            settingsViewRequested(2 /*page 2*/)
         }
     }
 
@@ -650,35 +596,6 @@ Rectangle {
         }
     }
 
-    MyToolButton {
-        id: copyButton
-        backgroundColor: theme.iconBackgroundLight
-        anchors.right: settingsButton.left
-        anchors.top: parent.top
-        anchors.topMargin: 42.5
-        anchors.rightMargin: 10
-        width: 40
-        height: 40
-        z: 200
-        padding: 15
-        source: "qrc:/gpt4all/icons/copy.svg"
-        Accessible.name: qsTr("Copy")
-        Accessible.description: qsTr("Copy the conversation to the clipboard")
-
-        TextEdit{
-            id: copyEdit
-            visible: false
-        }
-
-        onClicked: {
-            var conversation = getConversation()
-            copyEdit.text = conversation
-            copyEdit.selectAll()
-            copyEdit.copy()
-            copyMessage.open()
-        }
-    }
-
     function getConversation() {
         var conversation = "";
         for (var i = 0; i < chatModel.count; i++) {
@@ -716,29 +633,6 @@ Rectangle {
         return str + "]}"
     }
 
-    MyToolButton {
-        id: resetContextButton
-        backgroundColor: theme.iconBackgroundLight
-        anchors.right: copyButton.left
-        anchors.top: parent.top
-        anchors.topMargin: 42.5
-        anchors.rightMargin: 10
-        width: 40
-        height: 40
-        z: 200
-        padding: 15
-        source: "qrc:/gpt4all/icons/regenerate.svg"
-
-        Accessible.name: text
-        Accessible.description: qsTr("Reset the context and erase current conversation")
-
-        onClicked: {
-            Network.sendResetContext(chatModel.count)
-            currentChat.reset();
-            currentChat.processSystemPrompt();
-        }
-    }
-
     Dialog {
         id: checkForUpdatesError
         anchors.centerIn: parent
@@ -768,31 +662,12 @@ Rectangle {
         }
     }
 
-    ModelDownloaderDialog {
-        id: downloadNewModels
-        anchors.centerIn: parent
-        width: Math.min(1920, window.width - (window.width * .1))
-        height: window.height - (window.height * .1)
-        Item {
-            Accessible.role: Accessible.Dialog
-            Accessible.name: qsTr("Download new models")
-            Accessible.description: qsTr("Dialog for downloading new models")
-        }
-    }
-
     ChatDrawer {
         id: drawer
         anchors.left: parent.left
         anchors.top: accentRibbon.bottom
         anchors.bottom: parent.bottom
-        width: Math.min(600, 0.2 * window.width)
-        onDownloadClicked: {
-            downloadNewModels.showEmbeddingModels = false
-            downloadNewModels.open()
-        }
-        onAboutClicked: {
-            aboutDialog.open()
-        }
+        width: Math.max(180, Math.min(600, 0.2 * window.width))
     }
 
     PopupDialog {
@@ -936,6 +811,32 @@ Rectangle {
                             }
                         }
 
+                        Text {
+                            Layout.alignment: Qt.AlignHCenter
+                            textFormat: Text.StyledText
+                            text: qsTr(
+                            "<p></p><a href=\"https://docs.gpt4all.io/gpt4all_chat.html\">Documentation
+                            ")
+                            onLinkActivated: { Qt.openUrlExternally("https://docs.gpt4all.io/gpt4all_chat.html") }
+                            color: theme.textColor
+                            linkColor: theme.linkColor
+                            font.pixelSize: theme.fontSizeLarge
+                            wrapMode: Text.WordWrap
+                        }
+
+                        Text {
+                            Layout.alignment: Qt.AlignHCenter
+                            textFormat: Text.StyledText
+                            text: qsTr(
+                            "<a href=\"https://docs.gpt4all.io/gpt4all_faq.html\">Frequently Asked Questions
+                            ")
+                            onLinkActivated: { Qt.openUrlExternally("https://docs.gpt4all.io/gpt4all_faq.html") }
+                            color: theme.textColor
+                            linkColor: theme.linkColor
+                            font.pixelSize: theme.fontSizeLarge
+                            wrapMode: Text.WordWrap
+                        }
+
                         MyButton {
                             id: downloadButton
                             visible: LLM.isNetworkOnline
@@ -946,7 +847,7 @@ Rectangle {
                             padding: 18
                             leftPadding: 50
                             Image {
-                                id: image
+                                id: downloadImage
                                 anchors.verticalCenter: parent.verticalCenter
                                 anchors.left: parent.left
                                 anchors.leftMargin: 15
@@ -956,12 +857,13 @@ Rectangle {
                                 source: "qrc:/gpt4all/icons/download.svg"
                             }
                             ColorOverlay {
-                                anchors.fill: image
-                                source: image
+                                anchors.fill: downloadImage
+                                source: downloadImage
                                 color: theme.accentColor
                             }
                             onClicked: {
-                                downloadNewModels.open();
+                                console.log("download button")
+                                downloadViewRequested(false /*showEmbeddingModels*/);
                             }
                         }
                     }
@@ -970,10 +872,7 @@ Rectangle {
                 ListView {
                     id: listView
                     visible: ModelList.installedModels.count !== 0 && chatModel.count !== 0
-                    anchors.top: parent.top
-                    anchors.bottom: parent.bottom
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    width: Math.min(1280, parent.width)
+                    anchors.fill: parent
                     model: chatModel
 
                     ScrollBar.vertical: ScrollBar {
@@ -987,8 +886,15 @@ Rectangle {
                     delegate: TextArea {
                         id: myTextArea
                         text: value + references
-                        width: listView.width
-                        color: theme.textColor
+                        anchors.horizontalCenter: listView.contentItem.horizontalCenter
+                        width: Math.min(1280, listView.contentItem.width)
+                        color: {
+                            if (!currentChat.isServer)
+                                return theme.textColor
+                            if (name === qsTr("Response: "))
+                                return theme.white
+                            return theme.black
+                        }
                         wrapMode: Text.WordWrap
                         textFormat: TextEdit.PlainText
                         focus: false

@@ -68,7 +68,7 @@ def get_long_description():
 
 setup(
     name=package_name,
-    version="2.3.0",
+    version="2.4.0",
     description="Python bindings for GPT4All",
     long_description=get_long_description(),
     long_description_content_type="text/markdown",
@@ -90,6 +90,7 @@ setup(
         'requests',
         'tqdm',
         'importlib_resources; python_version < "3.9"',
+        'typing-extensions>=4.3.0; python_version >= "3.9" and python_version < "3.11"',
     ],
     extras_require={
         'dev': [
@@ -102,7 +103,8 @@ setup(
             'mkdocstrings[python]',
             'mkdocs-jupyter',
             'black',
-            'isort'
+            'isort',
+            'typing-extensions>=3.10',
         ]
     },
     package_data={'llmodel': [os.path.join(DEST_CLIB_DIRECTORY, "*")]},

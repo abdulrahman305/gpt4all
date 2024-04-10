@@ -3,6 +3,7 @@ Python only API for running all GPT4All models.
 """
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import sys
@@ -10,67 +11,126 @@ import time
 import warnings
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Union, overload
+from types import TracebackType
+from typing import TYPE_CHECKING, Any, Iterable, Literal, Protocol, overload
 
 import requests
 from requests.exceptions import ChunkedEncodingError
 from tqdm import tqdm
 from urllib3.exceptions import IncompleteRead, ProtocolError
 
-from . import _pyllmodel
+from ._pyllmodel import EmbedResult as EmbedResult, LLModel, ResponseCallbackType, empty_response_callback
+
+if TYPE_CHECKING:
+    from typing_extensions import Self, TypeAlias
+
+if sys.platform == 'darwin':
+    import fcntl
 
 # TODO: move to config
 DEFAULT_MODEL_DIRECTORY = Path.home() / ".cache" / "gpt4all"
 
 DEFAULT_PROMPT_TEMPLATE = "### Human:\n{0}\n\n### Assistant:\n"
 
-ConfigType = Dict[str, str]
-MessageType = Dict[str, str]
+ConfigType: TypeAlias = 'dict[str, Any]'
+MessageType: TypeAlias = 'dict[str, str]'
 
 
 class Embed4All:
     """
     Python class that handles embeddings for GPT4All.
-
-    Args:
-        model_name: The name of the embedding model to use. Defaults to `all-MiniLM-L6-v2.gguf2.f16.gguf`.
-
-    All other arguments are passed to the GPT4All constructor. See its documentation for more info.
     """
 
     MIN_DIMENSIONALITY = 64
 
-    def __init__(self, model_name: Optional[str] = None, **kwargs):
+    def __init__(self, model_name: str | None = None, *, n_threads: int | None = None, device: str | None = "cpu", **kwargs: Any):
+        """
+        Constructor
+
+        Args:
+            n_threads: number of CPU threads used by GPT4All. Default is None, then the number of threads are determined automatically.
+            device: The processing unit on which the embedding model will run. See the `GPT4All` constructor for more info.
+            kwargs: Remaining keyword arguments are passed to the `GPT4All` constructor.
+        """
         if model_name is None:
             model_name = 'all-MiniLM-L6-v2.gguf2.f16.gguf'
-        self.gpt4all = GPT4All(model_name, **kwargs)
+        self.gpt4all = GPT4All(model_name, n_threads=n_threads, device=device, **kwargs)
 
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(
+        self, typ: type[BaseException] | None, value: BaseException | None, tb: TracebackType | None,
+    ) -> None:
+        self.close()
+
+    def close(self) -> None:
+        """Delete the model instance and free associated system resources."""
+        self.gpt4all.close()
+
+    # return_dict=False
     @overload
     def embed(
-        self, text: str, prefix: str | None = ..., dimensionality: int | None = ..., long_text_mode: str = ...,
-        atlas: bool = ...,
+        self, text: str, *, prefix: str | None = ..., dimensionality: int | None = ..., long_text_mode: str = ...,
+        return_dict: Literal[False] = ..., atlas: bool = ...,
     ) -> list[float]: ...
     @overload
     def embed(
-        self, text: list[str], prefix: str | None = ..., dimensionality: int | None = ..., long_text_mode: str = ...,
-        atlas: bool = ...,
+        self, text: list[str], *, prefix: str | None = ..., dimensionality: int | None = ..., long_text_mode: str = ...,
+        return_dict: Literal[False] = ..., atlas: bool = ...,
     ) -> list[list[float]]: ...
+    @overload
+    def embed(
+        self, text: str | list[str], *, prefix: str | None = ..., dimensionality: int | None = ...,
+        long_text_mode: str = ..., return_dict: Literal[False] = ..., atlas: bool = ...,
+    ) -> list[Any]: ...
 
-    def embed(self, text, prefix=None, dimensionality=None, long_text_mode="mean", atlas=False):
+    # return_dict=True
+    @overload
+    def embed(
+        self, text: str, *, prefix: str | None = ..., dimensionality: int | None = ..., long_text_mode: str = ...,
+        return_dict: Literal[True], atlas: bool = ...,
+    ) -> EmbedResult[list[float]]: ...
+    @overload
+    def embed(
+        self, text: list[str], *, prefix: str | None = ..., dimensionality: int | None = ..., long_text_mode: str = ...,
+        return_dict: Literal[True], atlas: bool = ...,
+    ) -> EmbedResult[list[list[float]]]: ...
+    @overload
+    def embed(
+        self, text: str | list[str], *, prefix: str | None = ..., dimensionality: int | None = ...,
+        long_text_mode: str = ..., return_dict: Literal[True], atlas: bool = ...,
+    ) -> EmbedResult[list[Any]]: ...
+
+    # return type unknown
+    @overload
+    def embed(
+        self, text: str | list[str], *, prefix: str | None = ..., dimensionality: int | None = ...,
+        long_text_mode: str = ..., return_dict: bool = ..., atlas: bool = ...,
+    ) -> Any: ...
+
+    def embed(
+        self, text: str | list[str], *, prefix: str | None = None, dimensionality: int | None = None,
+        long_text_mode: str = "mean", return_dict: bool = False, atlas: bool = False,
+    ) -> Any:
         """
         Generate one or more embeddings.
 
         Args:
             text: A text or list of texts to generate embeddings for.
             prefix: The model-specific prefix representing the embedding task, without the trailing colon. For Nomic
-            Embed this can be `search_query`, `search_document`, `classification`, or `clustering`.
+                Embed, this can be `search_query`, `search_document`, `classification`, or `clustering`. Defaults to
+                `search_document` or equivalent if known; otherwise, you must explicitly pass a prefix or an empty
+                string if none applies.
             dimensionality: The embedding dimension, for use with Matryoshka-capable models. Defaults to full-size.
             long_text_mode: How to handle texts longer than the model can accept. One of `mean` or `truncate`.
+            return_dict: Return the result as a dict that includes the number of prompt tokens processed.
             atlas: Try to be fully compatible with the Atlas API. Currently, this means texts longer than 8192 tokens
-            with long_text_mode="mean" will raise an error. Disabled by default.
+                with long_text_mode="mean" will raise an error. Disabled by default.
 
         Returns:
-            An embedding or list of embeddings of your text(s).
+            With return_dict=False, an embedding or list of embeddings of your text(s).
+            With return_dict=True, a dict with keys 'embeddings' and 'n_prompt_tokens'.
         """
         if dimensionality is None:
             dimensionality = -1
@@ -86,50 +146,55 @@ class Embed4All:
             do_mean = {"mean": True, "truncate": False}[long_text_mode]
         except KeyError:
             raise ValueError(f"Long text mode must be one of 'mean' or 'truncate', got {long_text_mode!r}")
-        return self.gpt4all.model.generate_embeddings(text, prefix, dimensionality, do_mean, atlas)
+        result = self.gpt4all.model.generate_embeddings(text, prefix, dimensionality, do_mean, atlas)
+        return result if return_dict else result['embeddings']
 
 
 class GPT4All:
     """
     Python class that handles instantiation, downloading, generation and chat with GPT4All models.
-
-    Args:
-        model_name: Name of GPT4All or custom model. Including ".gguf" file extension is optional but encouraged.
-        model_path: Path to directory containing model file or, if file does not exist, where to download model.
-            Default is None, in which case models will be stored in `~/.cache/gpt4all/`.
-        model_type: Model architecture. This argument currently does not have any functionality and is just used as
-            descriptive identifier for user. Default is None.
-        allow_download: Allow API to download models from gpt4all.io. Default is True.
-        n_threads: number of CPU threads used by GPT4All. Default is None, then the number of threads are determined automatically.
-        device: The processing unit on which the GPT4All model will run. It can be set to:
-            - "cpu": Model will run on the central processing unit.
-            - "gpu": Model will run on the best available graphics processing unit, irrespective of its vendor.
-            - "amd", "nvidia", "intel": Model will run on the best available GPU from the specified vendor.
-            Alternatively, a specific GPU name can also be provided, and the model will run on the GPU that matches the name if it's available.
-            Default is "cpu".
-
-            Note: If a selected GPU device does not have sufficient RAM to accommodate the model, an error will be thrown, and the GPT4All instance will be rendered invalid. It's advised to ensure the device has enough memory before initiating the model.
-        n_ctx: Maximum size of context window
-        ngl: Number of GPU layers to use (Vulkan)
-        verbose: If True, print debug messages.
     """
 
     def __init__(
         self,
         model_name: str,
-        model_path: Optional[Union[str, os.PathLike[str]]] = None,
-        model_type: Optional[str] = None,
+        *,
+        model_path: str | os.PathLike[str] | None = None,
+        model_type: str | None = None,
         allow_download: bool = True,
-        n_threads: Optional[int] = None,
-        device: Optional[str] = "cpu",
+        n_threads: int | None = None,
+        device: str | None = "cpu",
         n_ctx: int = 2048,
         ngl: int = 100,
         verbose: bool = False,
     ):
+        """
+        Constructor
+
+        Args:
+            model_name: Name of GPT4All or custom model. Including ".gguf" file extension is optional but encouraged.
+            model_path: Path to directory containing model file or, if file does not exist, where to download model.
+                Default is None, in which case models will be stored in `~/.cache/gpt4all/`.
+            model_type: Model architecture. This argument currently does not have any functionality and is just used as
+                descriptive identifier for user. Default is None.
+            allow_download: Allow API to download models from gpt4all.io. Default is True.
+            n_threads: number of CPU threads used by GPT4All. Default is None, then the number of threads are determined automatically.
+            device: The processing unit on which the GPT4All model will run. It can be set to:
+                - "cpu": Model will run on the central processing unit.
+                - "gpu": Model will run on the best available graphics processing unit, irrespective of its vendor.
+                - "amd", "nvidia", "intel": Model will run on the best available GPU from the specified vendor.
+                - A specific device name from the list returned by `GPT4All.list_gpus()`.
+                Default is "cpu".
+
+                Note: If a selected GPU device does not have sufficient RAM to accommodate the model, an error will be thrown, and the GPT4All instance will be rendered invalid. It's advised to ensure the device has enough memory before initiating the model.
+            n_ctx: Maximum size of context window
+            ngl: Number of GPU layers to use (Vulkan)
+            verbose: If True, print debug messages.
+        """
         self.model_type = model_type
         # Retrieve model and download if allowed
         self.config: ConfigType = self.retrieve_model(model_name, model_path=model_path, allow_download=allow_download, verbose=verbose)
-        self.model = _pyllmodel.LLModel(self.config["path"], n_ctx, ngl)
+        self.model = LLModel(self.config["path"], n_ctx, ngl)
         if device is not None and device != "cpu":
             self.model.init_gpu(device)
         self.model.load_model()
@@ -140,19 +205,31 @@ class GPT4All:
         self._history: list[MessageType] | None = None
         self._current_prompt_template: str = "{0}"
 
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(
+        self, typ: type[BaseException] | None, value: BaseException | None, tb: TracebackType | None,
+    ) -> None:
+        self.close()
+
+    def close(self) -> None:
+        """Delete the model instance and free associated system resources."""
+        self.model.close()
+
     @property
     def current_chat_session(self) -> list[MessageType] | None:
-        return self._history
+        return None if self._history is None else list(self._history)
 
     @staticmethod
-    def list_models() -> List[ConfigType]:
+    def list_models() -> list[ConfigType]:
         """
-        Fetch model list from https://gpt4all.io/models/models2.json.
+        Fetch model list from https://gpt4all.io/models/models3.json.
 
         Returns:
             Model list in JSON format.
         """
-        resp = requests.get("https://gpt4all.io/models/models2.json")
+        resp = requests.get("https://gpt4all.io/models/models3.json")
         if resp.status_code != 200:
             raise ValueError(f'Request failed: HTTP {resp.status_code} {resp.reason}')
         return resp.json()
@@ -161,7 +238,7 @@ class GPT4All:
     def retrieve_model(
         cls,
         model_name: str,
-        model_path: Optional[Union[str, os.PathLike[str]]] = None,
+        model_path: str | os.PathLike[str] | None = None,
         allow_download: bool = True,
         verbose: bool = False,
     ) -> ConfigType:
@@ -214,7 +291,11 @@ class GPT4All:
                 print(f"Found model file at {str(model_dest)!r}", file=sys.stderr)
         elif allow_download:
             # If model file does not exist, download
-            config["path"] = str(cls.download_model(model_filename, model_path, verbose=verbose, url=config.get("url")))
+            filesize = config.get("filesize")
+            config["path"] = str(cls.download_model(
+                model_filename, model_path, verbose=verbose, url=config.get("url"),
+                expected_size=None if filesize is None else int(filesize), expected_md5=config.get("md5sum"),
+            ))
         else:
             raise FileNotFoundError(f"Model file does not exist: {model_dest!r}")
 
@@ -225,7 +306,9 @@ class GPT4All:
         model_filename: str,
         model_path: str | os.PathLike[str],
         verbose: bool = True,
-        url: Optional[str] = None,
+        url: str | None = None,
+        expected_size: int | None = None,
+        expected_md5: str | None = None,
     ) -> str | os.PathLike[str]:
         """
         Download model from https://gpt4all.io.
@@ -235,13 +318,14 @@ class GPT4All:
             model_path: Path to download model to.
             verbose: If True (default), print debug messages.
             url: the models remote url (e.g. may be hosted on HF)
+            expected_size: The expected size of the download.
+            expected_md5: The expected MD5 hash of the download.
 
         Returns:
             Model file destination.
         """
 
         # Download model
-        download_path = Path(model_path) / model_filename
         if url is None:
             url = f"https://gpt4all.io/models/gguf/{model_filename}"
 
@@ -250,11 +334,14 @@ class GPT4All:
             if offset:
                 print(f"\nDownload interrupted, resuming from byte position {offset}", file=sys.stderr)
                 headers['Range'] = f'bytes={offset}-'  # resume incomplete response
+                headers["Accept-Encoding"] = "identity"  # Content-Encoding changes meaning of ranges
             response = requests.get(url, stream=True, headers=headers)
             if response.status_code not in (200, 206):
                 raise ValueError(f'Request failed: HTTP {response.status_code} {response.reason}')
             if offset and (response.status_code != 206 or str(offset) not in response.headers.get('Content-Range', '')):
                 raise ValueError('Connection was interrupted and server does not support range requests')
+            if (enc := response.headers.get("Content-Encoding")) is not None:
+                raise ValueError(f"Expected identity Content-Encoding, got {enc}")
             return response
 
         response = make_request()
@@ -262,49 +349,97 @@ class GPT4All:
         total_size_in_bytes = int(response.headers.get("content-length", 0))
         block_size = 2**20  # 1 MB
 
-        with open(download_path, "wb") as file, \
-                tqdm(total=total_size_in_bytes, unit="iB", unit_scale=True) as progress_bar:
+        partial_path = Path(model_path) / (model_filename + ".part")
+
+        with open(partial_path, "w+b") as partf:
             try:
-                while True:
-                    last_progress = progress_bar.n
-                    try:
-                        for data in response.iter_content(block_size):
-                            file.write(data)
-                            progress_bar.update(len(data))
-                    except ChunkedEncodingError as cee:
-                        if cee.args and isinstance(pe := cee.args[0], ProtocolError):
-                            if len(pe.args) >= 2 and isinstance(ir := pe.args[1], IncompleteRead):
-                                assert progress_bar.n <= ir.partial  # urllib3 may be ahead of us but never behind
-                                # the socket was closed during a read - retry
-                                response = make_request(progress_bar.n)
-                                continue
-                        raise
-                    if total_size_in_bytes != 0 and progress_bar.n < total_size_in_bytes:
-                        if progress_bar.n == last_progress:
-                            raise RuntimeError('Download not making progress, aborting.')
-                        # server closed connection prematurely - retry
-                        response = make_request(progress_bar.n)
-                        continue
-                    break
-            except Exception:
+                with tqdm(desc="Downloading", total=total_size_in_bytes, unit="iB", unit_scale=True) as progress_bar:
+                    while True:
+                        last_progress = progress_bar.n
+                        try:
+                            for data in response.iter_content(block_size):
+                                partf.write(data)
+                                progress_bar.update(len(data))
+                        except ChunkedEncodingError as cee:
+                            if cee.args and isinstance(pe := cee.args[0], ProtocolError):
+                                if len(pe.args) >= 2 and isinstance(ir := pe.args[1], IncompleteRead):
+                                    assert progress_bar.n <= ir.partial  # urllib3 may be ahead of us but never behind
+                                    # the socket was closed during a read - retry
+                                    response = make_request(progress_bar.n)
+                                    continue
+                            raise
+                        if total_size_in_bytes != 0 and progress_bar.n < total_size_in_bytes:
+                            if progress_bar.n == last_progress:
+                                raise RuntimeError("Download not making progress, aborting.")
+                            # server closed connection prematurely - retry
+                            response = make_request(progress_bar.n)
+                            continue
+                        break
+
+                # verify file integrity
+                file_size = partf.tell()
+                if expected_size is not None and file_size != expected_size:
+                    raise ValueError(f"Expected file size of {expected_size} bytes, got {file_size}")
+                if expected_md5 is not None:
+                    partf.seek(0)
+                    hsh = hashlib.md5()
+                    with tqdm(desc="Verifying", total=file_size, unit="iB", unit_scale=True) as bar:
+                        while chunk := partf.read(block_size):
+                            hsh.update(chunk)
+                            bar.update(len(chunk))
+                    if hsh.hexdigest() != expected_md5.lower():
+                        raise ValueError(f"Expected MD5 hash of {expected_md5!r}, got {hsh.hexdigest()!r}")
+            except:
                 if verbose:
                     print("Cleaning up the interrupted download...", file=sys.stderr)
                 try:
-                    os.remove(download_path)
+                    os.remove(partial_path)
                 except OSError:
                     pass
                 raise
 
-        if os.name == 'nt':
-            time.sleep(2)  # Sleep for a little bit so Windows can remove file lock
+            # flush buffers and sync the inode
+            partf.flush()
+            _fsync(partf)
+
+        # move to final destination
+        download_path = Path(model_path) / model_filename
+        try:
+            os.rename(partial_path, download_path)
+        except FileExistsError:
+            try:
+                os.remove(partial_path)
+            except OSError:
+                pass
+            raise
 
         if verbose:
             print(f"Model downloaded to {str(download_path)!r}", file=sys.stderr)
         return download_path
 
+    @overload
+    def generate(
+        self, prompt: str, *, max_tokens: int = ..., temp: float = ..., top_k: int = ..., top_p: float = ...,
+        min_p: float = ..., repeat_penalty: float = ..., repeat_last_n: int = ..., n_batch: int = ...,
+        n_predict: int | None = ..., streaming: Literal[False] = ..., callback: ResponseCallbackType = ...,
+    ) -> str: ...
+    @overload
+    def generate(
+        self, prompt: str, *, max_tokens: int = ..., temp: float = ..., top_k: int = ..., top_p: float = ...,
+        min_p: float = ..., repeat_penalty: float = ..., repeat_last_n: int = ..., n_batch: int = ...,
+        n_predict: int | None = ..., streaming: Literal[True], callback: ResponseCallbackType = ...,
+    ) -> Iterable[str]: ...
+    @overload
+    def generate(
+        self, prompt: str, *, max_tokens: int = ..., temp: float = ..., top_k: int = ..., top_p: float = ...,
+        min_p: float = ..., repeat_penalty: float = ..., repeat_last_n: int = ..., n_batch: int = ...,
+        n_predict: int | None = ..., streaming: bool, callback: ResponseCallbackType = ...,
+    ) -> Any: ...
+
     def generate(
         self,
         prompt: str,
+        *,
         max_tokens: int = 200,
         temp: float = 0.7,
         top_k: int = 40,
@@ -313,10 +448,10 @@ class GPT4All:
         repeat_penalty: float = 1.18,
         repeat_last_n: int = 64,
         n_batch: int = 8,
-        n_predict: Optional[int] = None,
+        n_predict: int | None = None,
         streaming: bool = False,
-        callback: _pyllmodel.ResponseCallbackType = _pyllmodel.empty_response_callback,
-    ) -> Union[str, Iterable[str]]:
+        callback: ResponseCallbackType = empty_response_callback,
+    ) -> Any:
         """
         Generate outputs from any GPT4All model.
 
@@ -339,7 +474,7 @@ class GPT4All:
         """
 
         # Preparing the model request
-        generate_kwargs: Dict[str, Any] = dict(
+        generate_kwargs: dict[str, Any] = dict(
             temp=temp,
             top_k=top_k,
             top_p=top_p,
@@ -361,7 +496,7 @@ class GPT4All:
                 if reset:
                     # ingest system prompt
                     self.model.prompt_model(self._history[0]["content"], "%1",
-                                            _pyllmodel.empty_response_callback,
+                                            empty_response_callback,
                                             n_batch=n_batch, n_predict=0, special=True)
                 prompt_template = self._current_prompt_template.format("%1", "%2")
             else:
@@ -380,7 +515,7 @@ class GPT4All:
             generate_kwargs["reset_context"] = True
 
         # Prepare the callback, process the model response
-        output_collector: List[MessageType]
+        output_collector: list[MessageType]
         output_collector = [
             {"content": ""}
         ]  # placeholder for the self._history if chat session is not activated
@@ -390,9 +525,9 @@ class GPT4All:
             output_collector = self._history
 
         def _callback_wrapper(
-            callback: _pyllmodel.ResponseCallbackType,
-            output_collector: List[MessageType],
-        ) -> _pyllmodel.ResponseCallbackType:
+            callback: ResponseCallbackType,
+            output_collector: list[MessageType],
+        ) -> ResponseCallbackType:
             def _callback(token_id: int, response: str) -> bool:
                 nonlocal callback, output_collector
 
@@ -456,14 +591,27 @@ class GPT4All:
             self._history = None
             self._current_prompt_template = "{0}"
 
+    @staticmethod
+    def list_gpus() -> list[str]:
+        """
+        List the names of the available GPU devices.
+
+        Returns:
+            A list of strings representing the names of the available GPU devices.
+        """
+        return LLModel.list_gpus()
+
     def _format_chat_prompt_template(
         self,
-        messages: List[MessageType],
+        messages: list[MessageType],
         default_prompt_header: str = "",
         default_prompt_footer: str = "",
     ) -> str:
         """
         Helper method for building a prompt from list of messages using the self._current_prompt_template as a template for each message.
+
+        Warning:
+            This function was deprecated in version 2.3.0, and will be removed in a future release.
 
         Args:
             messages:  List of dictionaries. Each dictionary should have a "role" key
@@ -495,3 +643,19 @@ def append_extension_if_missing(model_name):
     if not model_name.endswith((".bin", ".gguf")):
         model_name += ".gguf"
     return model_name
+
+
+class _HasFileno(Protocol):
+    def fileno(self) -> int: ...
+
+
+def _fsync(fd: int | _HasFileno) -> None:
+    if sys.platform == 'darwin':
+        # Apple's fsync does not flush the drive write cache
+        try:
+            fcntl.fcntl(fd, fcntl.F_FULLFSYNC)
+        except OSError:
+            pass  # fall back to fsync
+        else:
+            return
+    os.fsync(fd)

@@ -4,6 +4,7 @@
 #include <cerrno>
 #include <cstring>
 #include <iostream>
+#include <memory>
 #include <optional>
 #include <utility>
 
@@ -12,8 +13,6 @@ struct LLModelWrapper {
     LLModel::PromptContext promptContext;
     ~LLModelWrapper() { delete llModel; }
 };
-
-thread_local static std::string last_error_message;
 
 llmodel_model llmodel_model_create(const char *model_path) {
     const char *error;
@@ -24,24 +23,30 @@ llmodel_model llmodel_model_create(const char *model_path) {
     return fres;
 }
 
+static void llmodel_set_error(const char **errptr, const char *message) {
+    thread_local static std::string last_error_message;
+    if (errptr) {
+        last_error_message = message;
+        *errptr = last_error_message.c_str();
+    }
+}
+
 llmodel_model llmodel_model_create2(const char *model_path, const char *build_variant, const char **error) {
-    auto wrapper = new LLModelWrapper;
-
+    LLModel *llModel;
     try {
-        wrapper->llModel = LLModel::Implementation::construct(model_path, build_variant);
-        if (!wrapper->llModel) {
-            last_error_message = "Model format not supported (no matching implementation found)";
-        }
+        llModel = LLModel::Implementation::construct(model_path, build_variant);
     } catch (const std::exception& e) {
-        last_error_message = e.what();
+        llmodel_set_error(error, e.what());
+        return nullptr;
     }
 
-    if (!wrapper->llModel) {
-        delete std::exchange(wrapper, nullptr);
-        if (error) {
-            *error = last_error_message.c_str();
-        }
+    if (!llModel) {
+        llmodel_set_error(error, "Model format not supported (no matching implementation found)");
+        return nullptr;
     }
+
+    auto wrapper = new LLModelWrapper;
+    wrapper->llModel = llModel;
     return wrapper;
 }
 
@@ -154,13 +159,12 @@ void llmodel_prompt(llmodel_model model, const char *prompt,
 
 float *llmodel_embed(
     llmodel_model model, const char **texts, size_t *embedding_size, const char *prefix, int dimensionality,
-    bool do_mean, bool atlas, const char **error
+    size_t *token_count, bool do_mean, bool atlas, const char **error
 ) {
     auto *wrapper = static_cast<LLModelWrapper *>(model);
 
     if (!texts || !*texts) {
-        if (error)
-            *error = strdup("'texts' is NULL or empty");
+        llmodel_set_error(error, "'texts' is NULL or empty");
         return nullptr;
     }
 
@@ -181,10 +185,9 @@ float *llmodel_embed(
         if (prefix) { prefixStr = prefix; }
 
         embedding = new float[embd_size];
-        wrapper->llModel->embed(textsVec, embedding, prefixStr, dimensionality, do_mean, atlas);
+        wrapper->llModel->embed(textsVec, embedding, prefixStr, dimensionality, token_count, do_mean, atlas);
     } catch (std::exception const &e) {
-        if (error)
-            *error = strdup(e.what());
+        llmodel_set_error(error, e.what());
         return nullptr;
     }
 
@@ -219,28 +222,45 @@ const char *llmodel_get_implementation_search_path()
     return LLModel::Implementation::implementationsSearchPath().c_str();
 }
 
-struct llmodel_gpu_device* llmodel_available_gpu_devices(llmodel_model model, size_t memoryRequired, int* num_devices)
-{
-    auto *wrapper = static_cast<LLModelWrapper *>(model);
-    std::vector<LLModel::GPUDevice> devices = wrapper->llModel->availableGPUDevices(memoryRequired);
+// RAII wrapper around a C-style struct
+struct llmodel_gpu_device_cpp: llmodel_gpu_device {
+    llmodel_gpu_device_cpp() = default;
 
-    // Set the num_devices
+    llmodel_gpu_device_cpp(const llmodel_gpu_device_cpp  &) = delete;
+    llmodel_gpu_device_cpp(      llmodel_gpu_device_cpp &&) = delete;
+
+    const llmodel_gpu_device_cpp &operator=(const llmodel_gpu_device_cpp  &) = delete;
+          llmodel_gpu_device_cpp &operator=(      llmodel_gpu_device_cpp &&) = delete;
+
+    ~llmodel_gpu_device_cpp() {
+        free(const_cast<char *>(name));
+        free(const_cast<char *>(vendor));
+    }
+};
+
+static_assert(sizeof(llmodel_gpu_device_cpp) == sizeof(llmodel_gpu_device));
+
+struct llmodel_gpu_device *llmodel_available_gpu_devices(size_t memoryRequired, int *num_devices)
+{
+    static thread_local std::unique_ptr<llmodel_gpu_device_cpp[]> c_devices;
+
+    auto devices = LLModel::Implementation::availableGPUDevices(memoryRequired);
     *num_devices = devices.size();
 
-    if (*num_devices == 0) return nullptr;  // Return nullptr if no devices are found
+    if (devices.empty()) { return nullptr; /* no devices */ }
 
-    // Allocate memory for the output array
-    struct llmodel_gpu_device* output = (struct llmodel_gpu_device*) malloc(*num_devices * sizeof(struct llmodel_gpu_device));
-
-    for (int i = 0; i < *num_devices; i++) {
-        output[i].index = devices[i].index;
-        output[i].type = devices[i].type;
-        output[i].heapSize = devices[i].heapSize;
-        output[i].name = strdup(devices[i].name.c_str());  // Convert std::string to char* and allocate memory
-        output[i].vendor = strdup(devices[i].vendor.c_str());  // Convert std::string to char* and allocate memory
+    c_devices = std::make_unique<llmodel_gpu_device_cpp[]>(devices.size());
+    for (unsigned i = 0; i < devices.size(); i++) {
+        const auto &dev  =   devices[i];
+              auto &cdev = c_devices[i];
+        cdev.index    = dev.index;
+        cdev.type     = dev.type;
+        cdev.heapSize = dev.heapSize;
+        cdev.name     = strdup(dev.name.c_str());
+        cdev.vendor   = strdup(dev.vendor.c_str());
     }
 
-    return output;
+    return c_devices.get();
 }
 
 bool llmodel_gpu_init_gpu_device_by_string(llmodel_model model, size_t memoryRequired, const char *device)
