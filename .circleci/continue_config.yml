@@ -182,8 +182,7 @@ jobs:
             $Env:INCLUDE = "${Env:INCLUDE};C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Auxiliary\VS\include"
             $Env:INCLUDE = "${Env:INCLUDE};C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.29.30133\include"
             $Env:INCLUDE = "${Env:INCLUDE};C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.29.30133\ATLMFC\include"
-            mkdir build
-            cd build
+            $Env:VULKAN_SDK = "C:\VulkanSDK\1.3.261.1"
             & "C:\Qt\Tools\CMake_64\bin\cmake.exe" `
               "-DCMAKE_GENERATOR:STRING=Ninja" `
               "-DCMAKE_BUILD_TYPE=Release" `
