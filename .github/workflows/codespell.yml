@@ -17,3 +17,7 @@ jobs:
         uses: actions/checkout@v3
       - name: Codespell
         uses: codespell-project/actions-codespell@v2
+      - name: Ensure compatibility with upstream repository
+        run: |
+          echo "Ensuring compatibility with upstream repository"
+          # Add any necessary steps or actions here

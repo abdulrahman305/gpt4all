@@ -15,6 +15,10 @@ Please note we have a code of conduct, please follow it in all your interactions
 4. Pull requests must have sign-off from one other developer. Reach out to a repository owner once your
    code is ready to be merged into `main`.
 
+## Updated CircleCI Configuration
+
+The CircleCI configuration has been updated to ensure compatibility with the upstream repository. The updated configuration includes the necessary jobs and workflows, as well as any new required parameters or settings.
+
 ## Code of Conduct
 
 ### Our Pledge

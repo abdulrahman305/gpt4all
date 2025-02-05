@@ -187,3 +187,20 @@ build-*
 
 # LLM models
 *.gguf
+
+# CircleCI
+.circleci/config.yml
+.circleci/continue_config.yml
+
+# Submodules
+.gitmodules
+
+# GitHub Workflows
+.github/workflows/close_issues.yml
+.github/workflows/codespell.yml
+
+# Docker Compose
+gpt4all-api/docker-compose.yaml
+
+# CMake
+gpt4all-backend/CMakeLists.txt
