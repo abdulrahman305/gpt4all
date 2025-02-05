@@ -24,6 +24,17 @@ extern "C" {
 typedef void *llmodel_model;
 
 /**
+ * Structure containing any errors that may eventually occur
+ */
+struct llmodel_error {
+    const char *message;  // Human readable error description; Thread-local; guaranteed to survive until next llmodel C API call
+    int code;             // errno; 0 if none
+};
+#ifndef __cplusplus
+typedef struct llmodel_error llmodel_error;
+#endif
+
+/**
  * llmodel_prompt_context structure for holding the prompt context.
  * NOTE: The implementation takes care of all the memory handling of the raw logits pointer and the
  * raw tokens pointer. Attempting to resize them or modify them in any way can lead to undefined
@@ -39,7 +50,6 @@ struct llmodel_prompt_context {
     int32_t n_predict;      // number of tokens to predict
     int32_t top_k;          // top k logits to sample from
     float top_p;            // nucleus sampling probability threshold
-    float min_p;            // Min P sampling
     float temp;             // temperature to adjust model's output distribution
     int32_t n_batch;        // number of predictions to generate in parallel
     float repeat_penalty;   // penalty factor for repeated tokens
@@ -48,9 +58,9 @@ struct llmodel_prompt_context {
 };
 
 struct llmodel_gpu_device {
-    int index;
-    int type; // same as VkPhysicalDeviceType
-    size_t heapSize;
+    int index = 0;
+    int type = 0;           // same as VkPhysicalDeviceType
+    size_t heapSize = 0;
     const char * name;
     const char * vendor;
 };
@@ -95,10 +105,10 @@ DEPRECATED llmodel_model llmodel_model_create(const char *model_path);
  * Recognises correct model type from file at model_path
  * @param model_path A string representing the path to the model file; will only be used to detect model type.
  * @param build_variant A string representing the implementation to use (auto, default, avxonly, ...),
- * @param error A pointer to a string; will only be set on error.
+ * @param error A pointer to a llmodel_error; will only be set on error.
  * @return A pointer to the llmodel_model instance; NULL on error.
  */
-llmodel_model llmodel_model_create2(const char *model_path, const char *build_variant, const char **error);
+llmodel_model llmodel_model_create2(const char *model_path, const char *build_variant, llmodel_error *error);
 
 /**
  * Destroy a llmodel instance.
@@ -111,21 +121,17 @@ void llmodel_model_destroy(llmodel_model model);
  * Estimate RAM requirement for a model file
  * @param model A pointer to the llmodel_model instance.
  * @param model_path A string representing the path to the model file.
- * @param n_ctx Maximum size of context window
- * @param ngl Number of GPU layers to use (Vulkan)
  * @return size greater than 0 if the model was parsed successfully, 0 if file could not be parsed.
  */
-size_t llmodel_required_mem(llmodel_model model, const char *model_path, int n_ctx, int ngl);
+size_t llmodel_required_mem(llmodel_model model, const char *model_path);
 
 /**
  * Load a model from a file.
  * @param model A pointer to the llmodel_model instance.
  * @param model_path A string representing the path to the model file.
- * @param n_ctx Maximum size of context window
- * @param ngl Number of GPU layers to use (Vulkan)
  * @return true if the model was loaded successfully, false otherwise.
  */
-bool llmodel_loadModel(llmodel_model model, const char *model_path, int n_ctx, int ngl);
+bool llmodel_loadModel(llmodel_model model, const char *model_path);
 
 /**
  * Check if a model is loaded.
@@ -164,46 +170,29 @@ uint64_t llmodel_restore_state_data(llmodel_model model, const uint8_t *src);
  * Generate a response using the model.
  * @param model A pointer to the llmodel_model instance.
  * @param prompt A string representing the input prompt.
- * @param prompt_template A string representing the input prompt template.
  * @param prompt_callback A callback function for handling the processing of prompt.
  * @param response_callback A callback function for handling the generated response.
  * @param recalculate_callback A callback function for handling recalculation requests.
- * @param special True if special tokens in the prompt should be processed, false otherwise.
- * @param fake_reply A string to insert into context as the model's reply, or NULL to generate one.
  * @param ctx A pointer to the llmodel_prompt_context structure.
  */
 void llmodel_prompt(llmodel_model model, const char *prompt,
-                    const char *prompt_template,
                     llmodel_prompt_callback prompt_callback,
                     llmodel_response_callback response_callback,
                     llmodel_recalculate_callback recalculate_callback,
-                    llmodel_prompt_context *ctx,
-                    bool special,
-                    const char *fake_reply);
+                    llmodel_prompt_context *ctx);
 
 /**
  * Generate an embedding using the model.
  * NOTE: If given NULL pointers for the model or text, or an empty text, a NULL pointer will be
  * returned. Bindings should signal an error when NULL is the return value.
  * @param model A pointer to the llmodel_model instance.
- * @param texts A pointer to a NULL-terminated array of strings representing the texts to generate an
- * embedding for.
+ * @param text A string representing the text to generate an embedding for.
  * @param embedding_size A pointer to a size_t type that will be set by the call indicating the length
  * of the returned floating point array.
- * @param prefix The model-specific prefix representing the embedding task, without the trailing colon. NULL for no
- * prefix.
- * @param dimensionality The embedding dimension, for use with Matryoshka-capable models. Set to -1 to for full-size.
- * @param token_count Return location for the number of prompt tokens processed, or NULL.
- * @param do_mean True to average multiple embeddings if the text is longer than the model can accept, False to
- * truncate.
- * @param atlas Try to be fully compatible with the Atlas API. Currently, this means texts longer than 8192 tokens with
- * long_text_mode="mean" will raise an error. Disabled by default.
- * @param error Return location for a malloc()ed string that will be set on error, or NULL.
  * @return A pointer to an array of floating point values passed to the calling method which then will
- * be responsible for lifetime of this memory. NULL if an error occurred.
+ * be responsible for lifetime of this memory.
  */
-float *llmodel_embed(llmodel_model model, const char **texts, size_t *embedding_size, const char *prefix,
-                     int dimensionality, size_t *token_count, bool do_mean, bool atlas, const char **error);
+float *llmodel_embedding(llmodel_model model, const char *text, size_t *embedding_size);
 
 /**
  * Frees the memory allocated by the llmodel_embedding function.
@@ -241,10 +230,9 @@ const char *llmodel_get_implementation_search_path();
 
 /**
  * Get a list of available GPU devices given the memory required.
- * @param memoryRequired The minimum amount of VRAM, in bytes
  * @return A pointer to an array of llmodel_gpu_device's whose number is given by num_devices.
  */
-struct llmodel_gpu_device* llmodel_available_gpu_devices(size_t memoryRequired, int* num_devices);
+struct llmodel_gpu_device* llmodel_available_gpu_devices(llmodel_model model, size_t memoryRequired, int* num_devices);
 
 /**
  * Initializes a GPU device based on a specified string criterion.

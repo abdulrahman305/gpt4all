@@ -1,7 +1,8 @@
-#include <QDirIterator>
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
+
+#include <QDirIterator>
 
 #include "llm.h"
 #include "modellist.h"
@@ -12,7 +13,6 @@
 #include "mysettings.h"
 #include "config.h"
 #include "logger.h"
-#include "../gpt4all-backend/llmodel.h"
 
 int main(int argc, char *argv[])
 {
@@ -25,21 +25,6 @@ int main(int argc, char *argv[])
 
     QGuiApplication app(argc, argv);
     QQmlApplicationEngine engine;
-
-    QString llmodelSearchPaths = QCoreApplication::applicationDirPath();
-    const QString libDir = QCoreApplication::applicationDirPath() + "/../lib/";
-    if (LLM::directoryExists(libDir))
-        llmodelSearchPaths += ";" + libDir;
-#if defined(Q_OS_MAC)
-    const QString binDir = QCoreApplication::applicationDirPath() + "/../../../";
-    if (LLM::directoryExists(binDir))
-        llmodelSearchPaths += ";" + binDir;
-    const QString frameworksDir = QCoreApplication::applicationDirPath() + "/../Frameworks/";
-    if (LLM::directoryExists(frameworksDir))
-        llmodelSearchPaths += ";" + frameworksDir;
-#endif
-    LLModel::Implementation::setImplementationsSearchPath(llmodelSearchPaths.toStdString());
-
     qmlRegisterSingletonInstance("mysettings", 1, 0, "MySettings", MySettings::globalInstance());
     qmlRegisterSingletonInstance("modellist", 1, 0, "ModelList", ModelList::globalInstance());
     qmlRegisterSingletonInstance("chatlistmodel", 1, 0, "ChatListModel", ChatListModel::globalInstance());
@@ -63,11 +48,5 @@ int main(int argc, char *argv[])
     }
 #endif
 
-    int res = app.exec();
-
-    // Make sure ChatLLM threads are joined before global destructors run.
-    // Otherwise, we can get a heap-use-after-free inside of llama.cpp.
-    ChatListModel::globalInstance()->destroyChats();
-
-    return res;
+    return app.exec();
 }

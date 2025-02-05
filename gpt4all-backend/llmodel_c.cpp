@@ -1,11 +1,8 @@
 #include "llmodel_c.h"
 #include "llmodel.h"
 
-#include <cerrno>
 #include <cstring>
-#include <iostream>
-#include <memory>
-#include <optional>
+#include <cerrno>
 #include <utility>
 
 struct LLModelWrapper {
@@ -14,103 +11,121 @@ struct LLModelWrapper {
     ~LLModelWrapper() { delete llModel; }
 };
 
+
+thread_local static std::string last_error_message;
+
+
 llmodel_model llmodel_model_create(const char *model_path) {
-    const char *error;
-    auto fres = llmodel_model_create2(model_path, "auto", &error);
+    auto fres = llmodel_model_create2(model_path, "auto", nullptr);
     if (!fres) {
-        fprintf(stderr, "Unable to instantiate model: %s\n", error);
+        fprintf(stderr, "Invalid model file\n");
     }
     return fres;
 }
 
-static void llmodel_set_error(const char **errptr, const char *message) {
-    thread_local static std::string last_error_message;
-    if (errptr) {
-        last_error_message = message;
-        *errptr = last_error_message.c_str();
-    }
-}
-
-llmodel_model llmodel_model_create2(const char *model_path, const char *build_variant, const char **error) {
-    LLModel *llModel;
-    try {
-        llModel = LLModel::Implementation::construct(model_path, build_variant);
-    } catch (const std::exception& e) {
-        llmodel_set_error(error, e.what());
-        return nullptr;
-    }
-
-    if (!llModel) {
-        llmodel_set_error(error, "Model format not supported (no matching implementation found)");
-        return nullptr;
-    }
-
+llmodel_model llmodel_model_create2(const char *model_path, const char *build_variant, llmodel_error *error) {
     auto wrapper = new LLModelWrapper;
-    wrapper->llModel = llModel;
-    return wrapper;
+    int error_code = 0;
+
+    try {
+        wrapper->llModel = LLModel::Implementation::construct(model_path, build_variant);
+    } catch (const std::exception& e) {
+        error_code = EINVAL;
+        last_error_message = e.what();
+    }
+
+    if (!wrapper->llModel) {
+        delete std::exchange(wrapper, nullptr);
+        // Get errno and error message if none
+        if (error_code == 0) {
+            if (errno != 0) {
+                error_code = errno;
+                last_error_message = std::strerror(error_code);
+            } else {
+                error_code = ENOTSUP;
+                last_error_message = "Model format not supported (no matching implementation found)";
+            }
+        }
+        // Set error argument
+        if (error) {
+            error->message = last_error_message.c_str();
+            error->code = error_code;
+        }
+    }
+    return reinterpret_cast<llmodel_model*>(wrapper);
 }
 
 void llmodel_model_destroy(llmodel_model model) {
-    delete static_cast<LLModelWrapper *>(model);
+    delete reinterpret_cast<LLModelWrapper*>(model);
 }
 
-size_t llmodel_required_mem(llmodel_model model, const char *model_path, int n_ctx, int ngl)
+size_t llmodel_required_mem(llmodel_model model, const char *model_path)
 {
-    auto *wrapper = static_cast<LLModelWrapper *>(model);
-    return wrapper->llModel->requiredMem(model_path, n_ctx, ngl);
+    LLModelWrapper *wrapper = reinterpret_cast<LLModelWrapper*>(model);
+    return wrapper->llModel->requiredMem(model_path);
 }
 
-bool llmodel_loadModel(llmodel_model model, const char *model_path, int n_ctx, int ngl)
+bool llmodel_loadModel(llmodel_model model, const char *model_path)
 {
-    auto *wrapper = static_cast<LLModelWrapper *>(model);
-
-    std::string modelPath(model_path);
-    if (wrapper->llModel->isModelBlacklisted(modelPath)) {
-        size_t slash = modelPath.find_last_of("/\\");
-        auto basename = slash == std::string::npos ? modelPath : modelPath.substr(slash + 1);
-        std::cerr << "warning: model '" << basename << "' is out-of-date, please check for an updated version\n";
-    }
-    return wrapper->llModel->loadModel(modelPath, n_ctx, ngl);
+    LLModelWrapper *wrapper = reinterpret_cast<LLModelWrapper*>(model);
+    return wrapper->llModel->loadModel(model_path);
 }
 
 bool llmodel_isModelLoaded(llmodel_model model)
 {
-    auto *wrapper = static_cast<LLModelWrapper *>(model);
+    LLModelWrapper *wrapper = reinterpret_cast<LLModelWrapper*>(model);
     return wrapper->llModel->isModelLoaded();
 }
 
 uint64_t llmodel_get_state_size(llmodel_model model)
 {
-    auto *wrapper = static_cast<LLModelWrapper *>(model);
+    LLModelWrapper *wrapper = reinterpret_cast<LLModelWrapper*>(model);
     return wrapper->llModel->stateSize();
 }
 
 uint64_t llmodel_save_state_data(llmodel_model model, uint8_t *dest)
 {
-    auto *wrapper = static_cast<LLModelWrapper *>(model);
+    LLModelWrapper *wrapper = reinterpret_cast<LLModelWrapper*>(model);
     return wrapper->llModel->saveState(dest);
 }
 
 uint64_t llmodel_restore_state_data(llmodel_model model, const uint8_t *src)
 {
-    auto *wrapper = static_cast<LLModelWrapper *>(model);
+    LLModelWrapper *wrapper = reinterpret_cast<LLModelWrapper*>(model);
     return wrapper->llModel->restoreState(src);
 }
 
+// Wrapper functions for the C callbacks
+bool prompt_wrapper(int32_t token_id, void *user_data) {
+    llmodel_prompt_callback callback = reinterpret_cast<llmodel_prompt_callback>(user_data);
+    return callback(token_id);
+}
+
+bool response_wrapper(int32_t token_id, const std::string &response, void *user_data) {
+    llmodel_response_callback callback = reinterpret_cast<llmodel_response_callback>(user_data);
+    return callback(token_id, response.c_str());
+}
+
+bool recalculate_wrapper(bool is_recalculating, void *user_data) {
+    llmodel_recalculate_callback callback = reinterpret_cast<llmodel_recalculate_callback>(user_data);
+    return callback(is_recalculating);
+}
+
 void llmodel_prompt(llmodel_model model, const char *prompt,
-                    const char *prompt_template,
                     llmodel_prompt_callback prompt_callback,
                     llmodel_response_callback response_callback,
                     llmodel_recalculate_callback recalculate_callback,
-                    llmodel_prompt_context *ctx,
-                    bool special,
-                    const char *fake_reply)
+                    llmodel_prompt_context *ctx)
 {
-    auto *wrapper = static_cast<LLModelWrapper *>(model);
+    LLModelWrapper *wrapper = reinterpret_cast<LLModelWrapper*>(model);
 
-    auto response_func = [response_callback](int32_t token_id, const std::string &response) {
-        return response_callback(token_id, response.c_str());
-    };
+    // Create std::function wrappers that call the C function pointers
+    std::function<bool(int32_t)> prompt_func =
+        std::bind(&prompt_wrapper, std::placeholders::_1, reinterpret_cast<void*>(prompt_callback));
+    std::function<bool(int32_t, const std::string&)> response_func =
+        std::bind(&response_wrapper, std::placeholders::_1, std::placeholders::_2, reinterpret_cast<void*>(response_callback));
+    std::function<bool(bool)> recalc_func =
+        std::bind(&recalculate_wrapper, std::placeholders::_1, reinterpret_cast<void*>(recalculate_callback));
 
     if (size_t(ctx->n_past) < wrapper->promptContext.tokens.size())
         wrapper->promptContext.tokens.resize(ctx->n_past);
@@ -121,20 +136,14 @@ void llmodel_prompt(llmodel_model model, const char *prompt,
     wrapper->promptContext.n_predict = ctx->n_predict;
     wrapper->promptContext.top_k = ctx->top_k;
     wrapper->promptContext.top_p = ctx->top_p;
-    wrapper->promptContext.min_p = ctx->min_p;
     wrapper->promptContext.temp = ctx->temp;
     wrapper->promptContext.n_batch = ctx->n_batch;
     wrapper->promptContext.repeat_penalty = ctx->repeat_penalty;
     wrapper->promptContext.repeat_last_n = ctx->repeat_last_n;
     wrapper->promptContext.contextErase = ctx->context_erase;
 
-    std::string fake_reply_str;
-    if (fake_reply) { fake_reply_str = fake_reply; }
-    auto *fake_reply_p = fake_reply ? &fake_reply_str : nullptr;
-
     // Call the C++ prompt method
-    wrapper->llModel->prompt(prompt, prompt_template, prompt_callback, response_func, recalculate_callback,
-                             wrapper->promptContext, special, fake_reply_p);
+    wrapper->llModel->prompt(prompt, prompt_func, response_func, recalc_func, wrapper->promptContext);
 
     // Update the C context by giving access to the wrappers raw pointers to std::vector data
     // which involves no copies
@@ -149,7 +158,6 @@ void llmodel_prompt(llmodel_model model, const char *prompt,
     ctx->n_predict = wrapper->promptContext.n_predict;
     ctx->top_k = wrapper->promptContext.top_k;
     ctx->top_p = wrapper->promptContext.top_p;
-    ctx->min_p = wrapper->promptContext.min_p;
     ctx->temp = wrapper->promptContext.temp;
     ctx->n_batch = wrapper->promptContext.n_batch;
     ctx->repeat_penalty = wrapper->promptContext.repeat_penalty;
@@ -157,58 +165,38 @@ void llmodel_prompt(llmodel_model model, const char *prompt,
     ctx->context_erase = wrapper->promptContext.contextErase;
 }
 
-float *llmodel_embed(
-    llmodel_model model, const char **texts, size_t *embedding_size, const char *prefix, int dimensionality,
-    size_t *token_count, bool do_mean, bool atlas, const char **error
-) {
-    auto *wrapper = static_cast<LLModelWrapper *>(model);
-
-    if (!texts || !*texts) {
-        llmodel_set_error(error, "'texts' is NULL or empty");
+float *llmodel_embedding(llmodel_model model, const char *text, size_t *embedding_size)
+{
+    if (model == nullptr || text == nullptr || !strlen(text)) {
+        *embedding_size = 0;
         return nullptr;
     }
-
-    std::vector<std::string> textsVec;
-    while (*texts) { textsVec.emplace_back(*texts++); }
-
-    size_t embd_size;
-    float *embedding;
-
-    try {
-        embd_size = wrapper->llModel->embeddingSize();
-        if (dimensionality > 0 && dimensionality < int(embd_size))
-            embd_size = dimensionality;
-
-        embd_size *= textsVec.size();
-
-        std::optional<std::string> prefixStr;
-        if (prefix) { prefixStr = prefix; }
-
-        embedding = new float[embd_size];
-        wrapper->llModel->embed(textsVec, embedding, prefixStr, dimensionality, token_count, do_mean, atlas);
-    } catch (std::exception const &e) {
-        llmodel_set_error(error, e.what());
+    LLModelWrapper *wrapper = reinterpret_cast<LLModelWrapper*>(model);
+    std::vector<float> embeddingVector = wrapper->llModel->embedding(text);
+    float *embedding = (float *)malloc(embeddingVector.size() * sizeof(float));
+    if (embedding == nullptr) {
+        *embedding_size = 0;
         return nullptr;
     }
-
-    *embedding_size = embd_size;
+    std::copy(embeddingVector.begin(), embeddingVector.end(), embedding);
+    *embedding_size = embeddingVector.size();
     return embedding;
 }
 
 void llmodel_free_embedding(float *ptr)
 {
-    delete[] ptr;
+    free(ptr);
 }
 
 void llmodel_setThreadCount(llmodel_model model, int32_t n_threads)
 {
-    auto *wrapper = static_cast<LLModelWrapper *>(model);
+    LLModelWrapper *wrapper = reinterpret_cast<LLModelWrapper*>(model);
     wrapper->llModel->setThreadCount(n_threads);
 }
 
 int32_t llmodel_threadCount(llmodel_model model)
 {
-    auto *wrapper = static_cast<LLModelWrapper *>(model);
+    LLModelWrapper *wrapper = reinterpret_cast<LLModelWrapper*>(model);
     return wrapper->llModel->threadCount();
 }
 
@@ -222,67 +210,56 @@ const char *llmodel_get_implementation_search_path()
     return LLModel::Implementation::implementationsSearchPath().c_str();
 }
 
-// RAII wrapper around a C-style struct
-struct llmodel_gpu_device_cpp: llmodel_gpu_device {
-    llmodel_gpu_device_cpp() = default;
-
-    llmodel_gpu_device_cpp(const llmodel_gpu_device_cpp  &) = delete;
-    llmodel_gpu_device_cpp(      llmodel_gpu_device_cpp &&) = delete;
-
-    const llmodel_gpu_device_cpp &operator=(const llmodel_gpu_device_cpp  &) = delete;
-          llmodel_gpu_device_cpp &operator=(      llmodel_gpu_device_cpp &&) = delete;
-
-    ~llmodel_gpu_device_cpp() {
-        free(const_cast<char *>(name));
-        free(const_cast<char *>(vendor));
-    }
-};
-
-static_assert(sizeof(llmodel_gpu_device_cpp) == sizeof(llmodel_gpu_device));
-
-struct llmodel_gpu_device *llmodel_available_gpu_devices(size_t memoryRequired, int *num_devices)
+struct llmodel_gpu_device* llmodel_available_gpu_devices(llmodel_model model, size_t memoryRequired, int* num_devices)
 {
-    static thread_local std::unique_ptr<llmodel_gpu_device_cpp[]> c_devices;
+    LLModelWrapper *wrapper = reinterpret_cast<LLModelWrapper*>(model);
+    std::vector<LLModel::GPUDevice> devices = wrapper->llModel->availableGPUDevices(memoryRequired);
 
-    auto devices = LLModel::Implementation::availableGPUDevices(memoryRequired);
+    // Set the num_devices
     *num_devices = devices.size();
 
-    if (devices.empty()) { return nullptr; /* no devices */ }
+    if (*num_devices == 0) return nullptr;  // Return nullptr if no devices are found
 
-    c_devices = std::make_unique<llmodel_gpu_device_cpp[]>(devices.size());
-    for (unsigned i = 0; i < devices.size(); i++) {
-        const auto &dev  =   devices[i];
-              auto &cdev = c_devices[i];
-        cdev.index    = dev.index;
-        cdev.type     = dev.type;
-        cdev.heapSize = dev.heapSize;
-        cdev.name     = strdup(dev.name.c_str());
-        cdev.vendor   = strdup(dev.vendor.c_str());
+    // Allocate memory for the output array
+    struct llmodel_gpu_device* output = (struct llmodel_gpu_device*) malloc(*num_devices * sizeof(struct llmodel_gpu_device));
+
+    for (int i = 0; i < *num_devices; i++) {
+        output[i].index = devices[i].index;
+        output[i].type = devices[i].type;
+        output[i].heapSize = devices[i].heapSize;
+        output[i].name = strdup(devices[i].name.c_str());  // Convert std::string to char* and allocate memory
+        output[i].vendor = strdup(devices[i].vendor.c_str());  // Convert std::string to char* and allocate memory
     }
 
-    return c_devices.get();
+    return output;
 }
 
 bool llmodel_gpu_init_gpu_device_by_string(llmodel_model model, size_t memoryRequired, const char *device)
 {
-    auto *wrapper = static_cast<LLModelWrapper *>(model);
+    LLModelWrapper *wrapper = reinterpret_cast<LLModelWrapper*>(model);
     return wrapper->llModel->initializeGPUDevice(memoryRequired, std::string(device));
 }
 
 bool llmodel_gpu_init_gpu_device_by_struct(llmodel_model model, const llmodel_gpu_device *device)
 {
-    auto *wrapper = static_cast<LLModelWrapper *>(model);
-    return wrapper->llModel->initializeGPUDevice(device->index);
+    LLModel::GPUDevice d;
+    d.index = device->index;
+    d.type = device->type;
+    d.heapSize = device->heapSize;
+    d.name = device->name;
+    d.vendor = device->vendor;
+    LLModelWrapper *wrapper = reinterpret_cast<LLModelWrapper*>(model);
+    return wrapper->llModel->initializeGPUDevice(d);
 }
 
 bool llmodel_gpu_init_gpu_device_by_int(llmodel_model model, int device)
 {
-    auto *wrapper = static_cast<LLModelWrapper *>(model);
+    LLModelWrapper *wrapper = reinterpret_cast<LLModelWrapper*>(model);
     return wrapper->llModel->initializeGPUDevice(device);
 }
 
 bool llmodel_has_gpu_device(llmodel_model model)
 {
-    auto *wrapper = static_cast<LLModelWrapper *>(model);
+    LLModelWrapper *wrapper = reinterpret_cast<LLModelWrapper*>(model);
     return wrapper->llModel->hasGPUDevice();
 }

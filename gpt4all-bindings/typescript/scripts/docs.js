@@ -2,11 +2,7 @@
 
 const fs = require('fs');
 
-const newPath = '../python/docs/gpt4all_nodejs.md';
-const filepath = './README.md';
-const intro = fs.readFileSync(filepath);
-
-fs.writeFileSync(
-    newPath, intro
-);
-
+const newPath = '../python/docs/gpt4all_typescript.md';
+const filepath = 'README.md';
+const data = fs.readFileSync(filepath);
+fs.writeFileSync(newPath, data);

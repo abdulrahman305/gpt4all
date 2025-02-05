@@ -5,6 +5,8 @@
 /// </summary>
 public interface ILLModel : IDisposable
 {
+    ModelType ModelType { get; }
+
     ulong GetStateSizeBytes();
 
     int GetThreadCount();

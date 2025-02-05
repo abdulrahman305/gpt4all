@@ -23,7 +23,6 @@ public:
 
 public Q_SLOTS:
     void handleChunkSizeChanged();
-    void aboutToQuit();
 
 Q_SIGNALS:
     void requestAddFolder(const QString &collection, const QString &path);
@@ -37,6 +36,7 @@ private:
 
 private:
     explicit LocalDocs();
+    ~LocalDocs() {}
     friend class MyLocalDocs;
 };
 
