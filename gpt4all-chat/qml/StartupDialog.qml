@@ -52,19 +52,27 @@ MyDialog {
             ScrollBar.vertical.policy: ScrollBar.AlwaysOn
             ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
 
-            MyTextArea {
+            TextArea {
                 id: welcome
+                wrapMode: Text.Wrap
                 width: 1024 - 40
+                padding: 20
                 textFormat: TextEdit.MarkdownText
                 text: qsTr("### Release notes\n")
                     + Download.releaseInfo.notes
                     + qsTr("### Contributors\n")
                     + Download.releaseInfo.contributors
+                color: theme.textColor
+                font.pixelSize: theme.fontSizeLarge
                 focus: false
                 readOnly: true
                 Accessible.role: Accessible.Paragraph
                 Accessible.name: qsTr("Release notes")
                 Accessible.description: qsTr("Release notes for this version")
+                background: Rectangle {
+                    color: theme.backgroundLight
+                    radius: 10
+                }
             }
         }
 
@@ -75,9 +83,11 @@ MyDialog {
             ScrollBar.vertical.policy: ScrollBar.AlwaysOn
             ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
 
-            MyTextArea {
+            TextArea {
                 id: optInTerms
+                wrapMode: Text.Wrap
                 width: 1024 - 40
+                padding: 20
                 textFormat: TextEdit.MarkdownText
                 text: qsTr(
 "### Opt-ins for anonymous usage analytics and datalake
@@ -95,11 +105,17 @@ to download and will be used by Nomic AI to improve future GPT4All models. Nomic
 attribution information attached to your data and you will be credited as a contributor to any GPT4All
 model release that uses your data!")
 
+                color: theme.textColor
+                font.pixelSize: theme.fontSizeLarge
                 focus: false
                 readOnly: true
                 Accessible.role: Accessible.Paragraph
                 Accessible.name: qsTr("Terms for opt-in")
                 Accessible.description: qsTr("Describes what will happen when you opt-in")
+                background: Rectangle {
+                    color: theme.backgroundLight
+                    radius: 10
+                }
             }
         }
 
@@ -117,6 +133,7 @@ model release that uses your data!")
                 font.pixelSize: theme.fontSizeLarge
                 Accessible.role: Accessible.Paragraph
                 Accessible.name: qsTr("Opt-in for anonymous usage statistics")
+                Accessible.description: qsTr("Label for opt-in")
             }
 
             ButtonGroup {
@@ -145,7 +162,7 @@ model release that uses your data!")
                     font.pixelSize: theme.fontSizeLarge
                     Accessible.role: Accessible.RadioButton
                     Accessible.name: qsTr("Opt-in for anonymous usage statistics")
-                    Accessible.description: qsTr("Allow opt-in for anonymous usage statistics")
+                    Accessible.description: qsTr("Radio button to allow opt-in for anonymous usage statistics")
 
                     background: Rectangle {
                         color: "transparent"
@@ -186,7 +203,7 @@ model release that uses your data!")
                     font.pixelSize: theme.fontSizeLarge
                     Accessible.role: Accessible.RadioButton
                     Accessible.name: qsTr("Opt-out for anonymous usage statistics")
-                    Accessible.description: qsTr("Allow opt-out for anonymous usage statistics")
+                    Accessible.description: qsTr("Radio button to allow opt-out for anonymous usage statistics")
 
                     background: Rectangle {
                         color: "transparent"
@@ -232,7 +249,7 @@ model release that uses your data!")
                 font.pixelSize: theme.fontSizeLarge
                 Accessible.role: Accessible.Paragraph
                 Accessible.name: qsTr("Opt-in for network")
-                Accessible.description: qsTr("Allow opt-in for network")
+                Accessible.description: qsTr("Checkbox to allow opt-in for network")
             }
 
             ButtonGroup {
@@ -259,7 +276,7 @@ model release that uses your data!")
                     font.pixelSize: theme.fontSizeLarge
                     Accessible.role: Accessible.RadioButton
                     Accessible.name: qsTr("Opt-in for network")
-                    Accessible.description: qsTr("Allow opt-in anonymous sharing of chats to the GPT4All Datalake")
+                    Accessible.description: qsTr("Radio button to allow opt-in anonymous sharing of chats to the GPT4All Datalake")
 
                     background: Rectangle {
                         color: "transparent"
@@ -300,7 +317,7 @@ model release that uses your data!")
                     font.pixelSize: theme.fontSizeLarge
                     Accessible.role: Accessible.RadioButton
                     Accessible.name: qsTr("Opt-out for network")
-                    Accessible.description: qsTr("Allow opt-out anonymous sharing of chats to the GPT4All Datalake")
+                    Accessible.description: qsTr("Radio button to allow opt-out anonymous sharing of chats to the GPT4All Datalake")
 
                     background: Rectangle {
                         color: "transparent"

@@ -1,13 +1,12 @@
 from setuptools import setup, find_packages
 import os
-import pathlib
 import platform
 import shutil
 
 package_name = "gpt4all"
 
 # Define the location of your prebuilt C library files
-SRC_CLIB_DIRECTORY = os.path.join("..", "..", "gpt4all-backend")
+SRC_CLIB_DIRECtORY = os.path.join("..", "..", "gpt4all-backend")
 SRC_CLIB_BUILD_DIRECTORY = os.path.join("..", "..", "gpt4all-backend", "build") 
 
 LIB_NAME = "llmodel"
@@ -56,29 +55,17 @@ def copy_prebuilt_C_lib(src_dir, dest_dir, dest_build_dir):
 
 # NOTE: You must provide correct path to the prebuilt llmodel C library. 
 # Specifically, the llmodel.h and C shared library are needed.
-copy_prebuilt_C_lib(SRC_CLIB_DIRECTORY,
+copy_prebuilt_C_lib(SRC_CLIB_DIRECtORY,
                     DEST_CLIB_DIRECTORY,
                     DEST_CLIB_BUILD_DIRECTORY)
 
-
-def get_long_description():
-    with open(pathlib.Path(__file__).parent / "README.md", encoding="utf-8") as fp:
-        return fp.read()
-
-
 setup(
     name=package_name,
-    version="2.4.0",
+    version="1.0.9",
     description="Python bindings for GPT4All",
-    long_description=get_long_description(),
-    long_description_content_type="text/markdown",
     author="Nomic and the Open Source Community",
     author_email="support@nomic.ai",
-    url="https://gpt4all.io/",
-    project_urls={
-        "Documentation": "https://docs.gpt4all.io/gpt4all_python.html",
-        "Source code": "https://github.com/nomic-ai/gpt4all/tree/main/gpt4all-bindings/python",
-    },
+    url="https://pypi.org/project/gpt4all/",
     classifiers = [
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: MIT License",
@@ -86,12 +73,7 @@ setup(
     ],
     python_requires='>=3.8',
     packages=find_packages(),
-    install_requires=[
-        'requests',
-        'tqdm',
-        'importlib_resources; python_version < "3.9"',
-        'typing-extensions>=4.3.0; python_version >= "3.9" and python_version < "3.11"',
-    ],
+    install_requires=['requests', 'tqdm'],
     extras_require={
         'dev': [
             'pytest',
@@ -103,8 +85,7 @@ setup(
             'mkdocstrings[python]',
             'mkdocs-jupyter',
             'black',
-            'isort',
-            'typing-extensions>=3.10',
+            'isort'
         ]
     },
     package_data={'llmodel': [os.path.join(DEST_CLIB_DIRECTORY, "*")]},
