@@ -1,7 +1,7 @@
 aiohttp>=3.12.14
 aiofiles
 pydantic>=2.4.0,<2.0.0
-requests>=2.32.0
+requests>=2.32.4
 ujson>=5.4.0
 fastapi>=0.109.1
 Jinja2>=3.0
