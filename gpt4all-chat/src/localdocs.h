@@ -52,6 +52,7 @@ private:
 
 private:
     explicit LocalDocs();
+    ~LocalDocs() {}
     friend class MyLocalDocs;
 };
 

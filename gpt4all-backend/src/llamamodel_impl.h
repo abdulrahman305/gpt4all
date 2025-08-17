@@ -4,6 +4,9 @@
 #ifndef LLAMAMODEL_H
 #define LLAMAMODEL_H
 
+#include <string>
+#include <functional>
+#include <vector>
 #include "llmodel.h"
 
 #include <memory>
@@ -14,20 +17,16 @@
 #include <unordered_map>
 
 struct LLamaPrivate;
-struct EmbModelSpec;
-
 class LLamaModel : public LLModel {
 public:
     LLamaModel();
     ~LLamaModel();
 
-    bool supportsEmbedding() const override { return m_supportsEmbedding; }
-    bool supportsCompletion() const override { return m_supportsCompletion; }
-    bool loadModel(const std::string &modelPath, int n_ctx, int ngl) override;
-    bool isModelBlacklisted(const std::string &modelPath) const override;
-    bool isEmbeddingModel(const std::string &modelPath) const override;
+    bool supportsEmbedding() const override { return false; }
+    bool supportsCompletion() const override { return true; }
+    bool loadModel(const std::string &modelPath) override;
     bool isModelLoaded() const override;
-    size_t requiredMem(const std::string &modelPath, int n_ctx, int ngl) override;
+    size_t requiredMem(const std::string &modelPath) override;
     size_t stateSize() const override;
     size_t saveState(std::span<uint8_t> stateOut, std::vector<Token> &inputTokensOut) const override;
     size_t restoreState(std::span<const uint8_t> state, std::span<const Token> inputTokens) override;
@@ -48,6 +47,11 @@ public:
     // automatic prefix
     void embed(const std::vector<std::string> &texts, float *embeddings, bool isRetrieval, int dimensionality = -1,
                size_t *tokenCount = nullptr, bool doMean = true, bool atlas = false) override;
+    std::vector<GPUDevice> availableGPUDevices(size_t memoryRequired) override;
+    bool initializeGPUDevice(size_t memoryRequired, const std::string& device) override;
+    bool initializeGPUDevice(const GPUDevice &device) override;
+    bool initializeGPUDevice(int device) override;
+    bool hasGPUDevice() override;
 
     int32_t contextLength() const override;
     auto specialTokens() -> std::unordered_map<std::string, std::string> const override;
@@ -79,6 +83,15 @@ private:
     std::unique_ptr<LLamaPrivate> d_ptr;
     bool m_supportsEmbedding = false;
     bool m_supportsCompletion = false;
+    LLamaPrivate *d_ptr;
+
+protected:
+    std::vector<Token> tokenize(PromptContext &, const std::string&) const override;
+    std::string tokenToString(Token) const override;
+    Token sampleToken(PromptContext& ctx) const override;
+    bool evalTokens(PromptContext& ctx, const std::vector<int32_t> &tokens) const override;
+    int32_t contextLength() const override;
+    const std::vector<Token>& endTokens() const override;
 };
 
 #endif // LLAMAMODEL_H

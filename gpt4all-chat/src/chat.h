@@ -32,10 +32,11 @@ class Chat : public QObject
     Q_PROPERTY(bool isModelLoaded READ isModelLoaded NOTIFY isModelLoadedChanged)
     Q_PROPERTY(bool isCurrentlyLoading READ isCurrentlyLoading NOTIFY isCurrentlyLoadingChanged)
     Q_PROPERTY(float modelLoadingPercentage READ modelLoadingPercentage NOTIFY modelLoadingPercentageChanged)
+    Q_PROPERTY(QString response READ response NOTIFY responseChanged)
     Q_PROPERTY(ModelInfo modelInfo READ modelInfo WRITE setModelInfo NOTIFY modelInfoChanged)
     Q_PROPERTY(bool responseInProgress READ responseInProgress NOTIFY responseInProgressChanged)
     Q_PROPERTY(bool isServer READ isServer NOTIFY isServerChanged)
-    Q_PROPERTY(ResponseState responseState READ responseState NOTIFY responseStateChanged)
+    Q_PROPERTY(QString responseState READ responseState NOTIFY responseStateChanged)
     Q_PROPERTY(QList<QString> collectionList READ collectionList NOTIFY collectionListChanged)
     Q_PROPERTY(QString modelLoadingError READ modelLoadingError NOTIFY modelLoadingErrorChanged)
     Q_PROPERTY(QString tokenSpeed READ tokenSpeed NOTIFY tokenSpeedChanged)
@@ -46,6 +47,7 @@ class Chat : public QObject
     // 0=no, 1=waiting, 2=working
     Q_PROPERTY(int trySwitchContextInProgress READ trySwitchContextInProgress NOTIFY trySwitchContextInProgressChanged)
     Q_PROPERTY(QList<QString> generatedQuestions READ generatedQuestions NOTIFY generatedQuestionsChanged)
+    Q_PROPERTY(QString tokenSpeed READ tokenSpeed NOTIFY tokenSpeedChanged);
     QML_ELEMENT
     QML_UNCREATABLE("Only creatable from c++!")
 
@@ -68,7 +70,6 @@ public:
     explicit Chat(QObject *parent = nullptr);
     explicit Chat(server_tag_t, QObject *parent = nullptr);
     virtual ~Chat();
-    void destroy() { m_llmodel->destroy(); }
     void connectLLM();
 
     QString id() const { return m_id; }
@@ -81,8 +82,6 @@ public:
     }
     ChatModel *chatModel() { return m_chatModel; }
 
-    bool isNewChat() const { return m_name == tr("New Chat") && !m_chatModel->count(); }
-
     Q_INVOKABLE void reset();
     bool  isModelLoaded()          const { return m_modelLoadingPercentage == 1.0f; }
     bool  isCurrentlyLoading()     const { return m_modelLoadingPercentage > 0.0f && m_modelLoadingPercentage < 1.0f; }
@@ -90,22 +89,22 @@ public:
     Q_INVOKABLE void newPromptResponsePair(const QString &prompt, const QList<QUrl> &attachedUrls = {});
     Q_INVOKABLE void regenerateResponse(int index);
     Q_INVOKABLE QVariant popPrompt(int index);
+    Q_INVOKABLE void processSystemPrompt();
+    Q_INVOKABLE bool isModelLoaded() const;
+    Q_INVOKABLE void prompt(const QString &prompt);
+    Q_INVOKABLE void regenerateResponse();
     Q_INVOKABLE void stopGenerating();
 
     QList<ResultInfo> databaseResults() const { return m_databaseResults; }
 
     bool responseInProgress() const { return m_responseInProgress; }
-    ResponseState responseState() const;
+    QString responseState() const;
     ModelInfo modelInfo() const;
     void setModelInfo(const ModelInfo &modelInfo);
 
-    Q_INVOKABLE void unloadModel();
-    Q_INVOKABLE void reloadModel();
-    Q_INVOKABLE void forceUnloadModel();
-    Q_INVOKABLE void forceReloadModel();
-    Q_INVOKABLE void trySwitchContextOfLoadedModel();
+    void unloadModel();
+    void reloadModel();
     void unloadAndDeleteLater();
-    void markForDeletion();
 
     QDateTime creationDate() const { return QDateTime::fromSecsSinceEpoch(m_creationDate); }
     bool serialize(QDataStream &stream, int version) const;
@@ -113,7 +112,6 @@ public:
     bool isServer() const { return m_isServer; }
 
     QList<QString> collectionList() const;
-    LocalDocsCollectionsModel *collectionModel() const { return m_collectionModel; }
 
     Q_INVOKABLE bool hasCollection(const QString &collection) const;
     Q_INVOKABLE void addCollection(const QString &collection);
@@ -145,6 +143,7 @@ Q_SIGNALS:
     void isCurrentlyLoadingChanged();
     void modelLoadingPercentageChanged();
     void modelLoadingWarning(const QString &warning);
+    void responseChanged();
     void responseInProgressChanged();
     void responseStateChanged();
     void promptRequested(const QStringList &enabledCollections);
@@ -169,6 +168,10 @@ Q_SIGNALS:
 private Q_SLOTS:
     void handleResponseChanged();
     void handleModelLoadingPercentageChanged(float);
+
+private Q_SLOTS:
+    void handleResponseChanged(const QString &response);
+    void handleModelLoadedChanged(bool);
     void promptProcessing();
     void generatingQuestions();
     void responseStopped(qint64 promptResponseMs);
@@ -183,6 +186,7 @@ private Q_SLOTS:
     void handleModelInfoChanged(const ModelInfo &modelInfo);
     void handleModelChanged(const ModelInfo &modelInfo);
     void handleTrySwitchContextOfLoadedModelCompleted(int value);
+    void handleModelInstalled();
 
 private:
     QString m_id;
@@ -194,10 +198,11 @@ private:
     QString m_tokenSpeed;
     QString m_device;
     QString m_fallbackReason;
+    QString m_response;
     QList<QString> m_collections;
     QList<QString> m_generatedQuestions;
     ChatModel *m_chatModel;
-    bool m_responseInProgress = false;
+    bool m_responseInProgress;
     ResponseState m_responseState;
     qint64 m_creationDate;
     ChatLLM *m_llmodel;
@@ -214,6 +219,10 @@ private:
     // - The chat was changed after loading it from disk.
     bool m_needsSave = true;
     int m_consecutiveToolCalls = 0;
+    bool m_isServer;
+    bool m_shouldDeleteLater;
+    bool m_isModelLoaded;
+    bool m_shouldLoadModelWhenInstalled;
 };
 
 #endif // CHAT_H

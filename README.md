@@ -134,3 +134,11 @@ If you utilize this repository, models or data in a downstream project, please c
   howpublished = {\url{https://github.com/nomic-ai/gpt4all}},
 }
 ```
+
+## Updated CircleCI Configuration
+
+The CircleCI configuration has been updated to ensure compatibility with the upstream repository. The updated configuration includes the necessary jobs and workflows, as well as any new required parameters or settings.
+
+## Submodule Management
+
+The repository includes a `.gitmodules` file for managing submodules. The submodule configuration has been updated to ensure compatibility with the upstream repository. The submodule paths and URLs are correct.

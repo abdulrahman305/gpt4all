@@ -132,6 +132,8 @@ public:
         // Select the existing new chat if we already have one
         if (m_newChat) {
             setCurrentChat(m_newChat);
+        // Don't add a new chat if we already have one
+        if (m_newChat || m_dummyChat)
             return;
         }
 
@@ -147,6 +149,18 @@ public:
         endInsertRows();
         emit countChanged();
         setCurrentChat(m_newChat);
+    }
+
+    Q_INVOKABLE void addDummyChat()
+    {
+        // Create a new dummy chat pointer and don't connect it
+        m_dummyChat = new Chat(this);
+        beginInsertRows(QModelIndex(), 0, 0);
+        m_chats.prepend(m_dummyChat);
+        endInsertRows();
+        emit countChanged();
+        m_currentChat = m_dummyChat;
+        emit currentChatChanged();
     }
 
     Q_INVOKABLE void addServerChat()
@@ -176,8 +190,6 @@ public:
             m_newChat->disconnect(this);
             m_newChat = nullptr;
         }
-
-        chat->markForDeletion();
 
         const int index = m_chats.indexOf(chat);
         if (m_chats.count() < 3 /*m_serverChat included*/) {
@@ -215,9 +227,9 @@ public:
         if (m_currentChat && m_currentChat != m_serverChat)
             m_currentChat->unloadModel();
         m_currentChat = chat;
-        emit currentChatChanged();
         if (!m_currentChat->isModelLoaded() && m_currentChat != m_serverChat)
-            m_currentChat->trySwitchContextOfLoadedModel();
+            m_currentChat->reloadModel();
+        emit currentChatChanged();
     }
 
     Q_INVOKABLE Chat* get(int index)
@@ -294,6 +306,10 @@ private:
     Chat* m_newChat = nullptr;
     Chat* m_serverChat = nullptr;
     Chat* m_currentChat = nullptr;
+    Chat* m_newChat;
+    Chat* m_dummyChat;
+    Chat* m_serverChat;
+    Chat* m_currentChat;
     QList<Chat*> m_chats;
     std::unique_ptr<ChatSaver> m_chatSaver;
     bool m_startedFinalSave = false;

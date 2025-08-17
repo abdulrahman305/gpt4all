@@ -73,6 +73,7 @@ public:
         FileCurrentlyProcessingRole,
         EmbeddingModelRole,
         UpdatingRole
+        InstalledRole
     };
 
     explicit LocalDocsModel(QObject *parent = nullptr);
@@ -91,6 +92,8 @@ public Q_SLOTS:
 Q_SIGNALS:
     void countChanged();
     void updatingChanged(const QString &collection);
+    void addCollectionItem(const CollectionItem &item);
+    void handleCollectionListUpdated(const QList<CollectionItem> &collectionList);
 
 private:
     void removeCollectionIf(std::function<bool(CollectionItem)> const &predicate);

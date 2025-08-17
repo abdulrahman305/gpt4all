@@ -1,17 +1,16 @@
-#!/usr/bin/env python3
 """GPT4All CLI
 
 The GPT4All CLI is a self-contained script based on the `gpt4all` and `typer` packages. It offers a
 REPL to communicate with a language model similar to the chat GUI application, but more basic.
 """
 
-import importlib.metadata
 import io
+import pkg_resources  # should be present as a dependency of gpt4all
 import sys
+import typer
+
 from collections import namedtuple
 from typing_extensions import Annotated
-
-import typer
 from gpt4all import GPT4All
 
 
@@ -54,18 +53,14 @@ def repl(
     model: Annotated[
         str,
         typer.Option("--model", "-m", help="Model to use for chatbot"),
-    ] = "mistral-7b-instruct-v0.1.Q4_0.gguf",
+    ] = "ggml-gpt4all-j-v1.3-groovy",
     n_threads: Annotated[
         int,
         typer.Option("--n-threads", "-t", help="Number of threads to use for chatbot"),
     ] = None,
-    device: Annotated[
-        str,
-        typer.Option("--device", "-d", help="Device to use for chatbot, e.g. gpu, amd, nvidia, intel. Defaults to CPU."),
-    ] = None,
 ):
     """The CLI read-eval-print loop."""
-    gpt4all_instance = GPT4All(model, device=device)
+    gpt4all_instance = GPT4All(model)
 
     # if threads are passed, set them
     if n_threads is not None:
@@ -84,7 +79,7 @@ def repl(
 
     use_new_loop = False
     try:
-        version = importlib.metadata.version('gpt4all')
+        version = pkg_resources.Environment()['gpt4all'][0].version
         version_major = int(version.split('.')[0])
         if version_major >= 1:
             use_new_loop = True
@@ -117,7 +112,6 @@ def _old_loop(gpt4all_instance):
             n_predict=200,
             top_k=40,
             top_p=0.9,
-            min_p=0.0,
             temp=0.9,
             n_batch=9,
             repeat_penalty=1.1,
@@ -154,7 +148,6 @@ def _new_loop(gpt4all_instance):
                 temp=0.9,
                 top_k=40,
                 top_p=0.9,
-                min_p=0.0,
                 repeat_penalty=1.1,
                 repeat_last_n=64,
                 n_batch=9,
