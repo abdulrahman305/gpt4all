@@ -25,7 +25,22 @@
 #include <optional>
 #include <sstream>
 #include <stdexcept>
+#include <map>
 #include <string>
+#include <vector>
+#include <iostream>
+#if defined(_WIN32) && defined(_MSC_VER)
+    #define WIN32_LEAN_AND_MEAN
+    #ifndef NOMINMAX
+        #define NOMINMAX
+    #endif
+    #include <windows.h>
+    #include <io.h>
+    #include <stdio.h>
+#else
+    #include <unistd.h>
+#endif
+#include <random>
 #include <thread>
 #include <vector>
 
@@ -132,18 +147,34 @@ static void llama_log_callback(ggml_log_level level, const char *text, void *use
     }
 
     fputs(text, stderr);
+#include <unordered_set>
+
+#include <llama.h>
+#include <ggml.h>
+
+#ifdef GGML_USE_KOMPUTE
+#include "ggml-vulkan.h"
+#endif
+
+namespace {
+const char *modelType_ = "LLaMA";
 }
 
 struct gpt_params {
     int32_t n_keep        = 0;    // number of tokens to keep from initial prompt
+#if LLAMA_DATE <= 230511
+    int32_t n_parts       = -1;   // amount of model parts (-1 = determine from model dimensions)
+#endif
 
+#if LLAMA_DATE >= 230519
     // sampling parameters
     float   tfs_z         = 1.0f; // 1.0 = disabled
     float   typical_p     = 1.0f; // 1.0 = disabled
+#endif
 
     std::string prompt = "";
 
-    enum ggml_type kv_type = GGML_TYPE_F16; // use f16 instead of f32 for memory kv
+    bool memory_f16        = true;  // use f16 instead of f32 for memory kv
 
     bool use_mmap          = true;  // use mmap for faster loads
     bool use_mlock         = false; // use mlock to keep model in memory
@@ -228,6 +259,42 @@ struct LLamaPrivate {
     llama_model_params    model_params;
     llama_context_params  ctx_params;
     llama_sampler        *sampler_chain;
+#if LLAMA_DATE >= 230519
+static int llama_sample_top_p_top_k(
+        llama_context *ctx,
+        const llama_token *last_n_tokens_data,
+        int last_n_tokens_size,
+        int top_k,
+        float top_p,
+        float temp,
+        float repeat_penalty) {
+    auto logits = llama_get_logits(ctx);
+    auto n_vocab = llama_n_vocab(ctx);
+    // Populate initial list of all candidates
+    std::vector<llama_token_data> candidates;
+    candidates.reserve(n_vocab);
+    for (int token_id = 0; token_id < n_vocab; token_id++) {
+        candidates.emplace_back(llama_token_data{token_id, logits[token_id], 0.0f});
+    }
+    llama_token_data_array candidates_p = {candidates.data(), candidates.size(), false};
+    // Sample repeat penalty
+    llama_sample_repetition_penalty(nullptr, &candidates_p, last_n_tokens_data, last_n_tokens_size, repeat_penalty);
+    // Temperature sampling
+    llama_sample_top_k(ctx, &candidates_p, top_k, 1);
+    llama_sample_tail_free(ctx, &candidates_p, 1.0f, 1);
+    llama_sample_typical(ctx, &candidates_p, 1.0f, 1);
+    llama_sample_top_p(ctx, &candidates_p, top_p, 1);
+    llama_sample_temperature(ctx, &candidates_p, temp);
+    return llama_sample_token(ctx, &candidates_p);
+}
+#endif
+
+struct LLamaPrivate {
+    const std::string modelPath;
+    bool modelLoaded;
+    llama_context *ctx = nullptr;
+    llama_context_params params;
+    int64_t n_threads = 0;
 };
 
 LLamaModel::LLamaModel()
@@ -252,6 +319,7 @@ size_t LLamaModel::requiredMem(const std::string &modelPath, int n_ctx, int ngl)
 {
     // TODO(cebtenzzre): update to GGUF
     (void)ngl; // FIXME(cetenzzre): use this value
+size_t LLamaModel::requiredMem(const std::string &modelPath) {
     auto fin = std::ifstream(modelPath, std::ios::binary);
     fin.seekg(0, std::ios_base::end);
     size_t filesize = fin.tellg();
@@ -268,6 +336,7 @@ size_t LLamaModel::requiredMem(const std::string &modelPath, int n_ctx, int ngl)
     fin.read(reinterpret_cast<char*>(&hparams.n_layer), sizeof(hparams.n_layer));
     fin.read(reinterpret_cast<char*>(&hparams.n_rot), sizeof(hparams.n_rot));
     fin.read(reinterpret_cast<char*>(&hparams.ftype), sizeof(hparams.ftype));
+    const size_t n_ctx = 2048;
     const size_t kvcache_element_size = 2; // fp16
     const size_t est_kvcache_size = hparams.n_embd * hparams.n_layer * 2u * n_ctx * kvcache_element_size;
     return filesize + est_kvcache_size;
@@ -335,35 +404,29 @@ cleanup:
 }
 
 bool LLamaModel::loadModel(const std::string &modelPath, int n_ctx, int ngl)
+bool LLamaModel::loadModel(const std::string &modelPath)
 {
-    d_ptr->modelLoaded = false;
-
-    // clean up after previous loadModel()
-    if (d_ptr->model) {
-        llama_free_model(d_ptr->model);
-        d_ptr->model = nullptr;
-    }
-    if (d_ptr->ctx) {
-        llama_free(d_ptr->ctx);
-        d_ptr->ctx = nullptr;
-    }
-
-    if (n_ctx < 8) {
-        std::cerr << "warning: minimum context size is 8, using minimum size.\n";
-        n_ctx = 8;
-    }
-
-    // -- load the model --
+    // load the model
+    d_ptr->params = llama_context_default_params();
 
     gpt_params params;
-
-    d_ptr->model_params = llama_model_default_params();
-
-    d_ptr->model_params.use_mmap  = params.use_mmap;
+    d_ptr->params.n_ctx      = 2048;
+    d_ptr->params.seed       = params.seed;
+    d_ptr->params.f16_kv     = params.memory_f16;
+    d_ptr->params.use_mmap   = params.use_mmap;
 #if defined (__APPLE__)
-    d_ptr->model_params.use_mlock = true;
+    d_ptr->params.use_mlock  = true;
 #else
-    d_ptr->model_params.use_mlock = params.use_mlock;
+    d_ptr->params.use_mlock  = params.use_mlock;
+#endif
+#if LLAMA_DATE <= 230511
+    d_ptr->params.n_parts  = params.n_parts;
+#endif
+#ifdef GGML_USE_METAL
+    std::cerr << "llama.cpp: using Metal" << std::endl;
+    // metal always runs the whole model if n_gpu_layers is not 0, at least
+    // currently
+    d_ptr->params.n_gpu_layers = 1;
 #endif
 
     d_ptr->model_params.progress_callback = &LLModel::staticProgressCallback;
@@ -464,21 +527,36 @@ bool LLamaModel::loadModel(const std::string &modelPath, int n_ctx, int ngl)
         d_ptr->backend_name = "vulkan";
 #elif defined(GGML_USE_CUDA)
         d_ptr->backend_name = "cuda";
+#ifdef GGML_USE_KOMPUTE
+    if (ggml_vk_has_device()) {
+        // vulkan always runs the whole model if n_gpu_layers is not 0, at least
+        // currently
+        d_ptr->params.n_gpu_layers = 1;
+    }
+#endif
+
+    d_ptr->ctx = llama_init_from_file(modelPath.c_str(), d_ptr->params);
+    if (!d_ptr->ctx) {
+        std::cerr << "LLAMA ERROR: failed to load model from " <<  modelPath << std::endl;
+        return false;
+    }
+
+#ifdef GGML_USE_KOMPUTE
+    if (ggml_vk_has_device()) {
+        std::cerr << "llama.cpp: using Vulkan on " << ggml_vk_current_device().name << std::endl;
+    }
 #endif
     }
 
-    m_supportsEmbedding = isEmbedding;
-    m_supportsCompletion = !isEmbedding;
-
-    fflush(stdout);
+    d_ptr->n_threads = std::min(4, (int32_t) std::thread::hardware_concurrency());
     d_ptr->modelLoaded = true;
+    fflush(stderr);
     return true;
 }
 
 void LLamaModel::setThreadCount(int32_t n_threads)
 {
     d_ptr->n_threads = n_threads;
-    llama_set_n_threads(d_ptr->ctx, n_threads, n_threads);
 }
 
 int32_t LLamaModel::threadCount() const
@@ -488,7 +566,7 @@ int32_t LLamaModel::threadCount() const
 
 LLamaModel::~LLamaModel()
 {
-    if (d_ptr->ctx) {
+    if(d_ptr->ctx) {
         llama_free(d_ptr->ctx);
     }
     llama_free_model(d_ptr->model);
@@ -527,6 +605,11 @@ std::vector<LLModel::Token> LLamaModel::tokenize(std::string_view str) const
     int32_t fres_len = llama_tokenize(
         d_ptr->model, str.data(), str.length(), fres.data(), fres.size(), /*add_special*/ true, /*parse_special*/ true
     );
+std::vector<LLModel::Token> LLamaModel::tokenize(PromptContext &ctx, const std::string &str) const
+{
+    const bool useBOS = ctx.n_past == 0 && (ctx.tokens.empty() || ctx.tokens.front() != llama_token_bos());
+    std::vector<LLModel::Token> fres(str.size()+4);
+    auto fres_len = llama_tokenize(d_ptr->ctx, str.c_str(), fres.data(), fres.size(), useBOS);
     fres.resize(fres_len);
     return fres;
 }
@@ -551,6 +634,7 @@ std::string LLamaModel::tokenToString(Token id) const
     }
 
     return std::string(result.data(), result.size());
+    return llama_token_to_str(d_ptr->ctx, id);
 }
 
 void LLamaModel::initSampler(const PromptContext &promptCtx)
@@ -593,6 +677,11 @@ void LLamaModel::initSampler(const PromptContext &promptCtx)
         for (auto *smpl : samplers)
             llama_sampler_chain_add(chain, smpl);
     }
+    const size_t n_prev_toks = std::min((size_t) promptCtx.repeat_last_n, promptCtx.tokens.size());
+    return llama_sample_top_p_top_k(d_ptr->ctx,
+        promptCtx.tokens.data() + promptCtx.tokens.size() - n_prev_toks,
+        n_prev_toks, promptCtx.top_k, promptCtx.top_p, promptCtx.temp,
+        promptCtx.repeat_penalty);
 }
 
 LLModel::Token LLamaModel::sampleToken() const
@@ -624,6 +713,16 @@ bool LLamaModel::evalTokens(int32_t nPast, std::span<const Token> tokens) const
     int res = llama_decode(d_ptr->ctx, batch);
     llama_batch_free(batch);
     return res == 0;
+    // When we recalculate context we could have erased the original BOS token... we need to replace it
+    const bool useBOS = ctx.n_past == 0 && (ctx.tokens.empty() || ctx.tokens.front() != llama_token_bos());
+    if (useBOS) {
+        std::vector<int32_t> myTokens;
+        myTokens.push_back(llama_token_bos());
+        myTokens.insert(myTokens.end(), tokens.begin(), tokens.end());
+        ctx.n_past += 1;
+        return llama_eval(d_ptr->ctx, myTokens.data(), myTokens.size(), ctx.n_past, d_ptr->n_threads) == 0;
+    } else
+        return llama_eval(d_ptr->ctx, tokens.data(), tokens.size(), ctx.n_past, d_ptr->n_threads) == 0;
 }
 
 void LLamaModel::shiftContext(const PromptContext &promptCtx, int32_t *nPast)
@@ -708,7 +807,8 @@ auto LLamaModel::inputTokens() const -> std::span<const Token>
 
 const std::vector<LLModel::Token> &LLamaModel::endTokens() const
 {
-    return d_ptr->end_tokens;
+    static const std::vector<LLModel::Token> fres = {llama_token_eos()};
+    return fres;
 }
 
 bool LLamaModel::shouldAddBOS() const
@@ -829,12 +929,11 @@ std::vector<LLModel::GPUDevice> LLamaModel::availableGPUDevices(size_t memoryReq
 #else
     (void)memoryRequired;
     std::cerr << __func__ << ": built without a GPU backend\n";
+#if defined(GGML_USE_KOMPUTE)
+#include "ggml-vulkan.h"
 #endif
 
-    return {};
-}
-
-bool LLamaModel::initializeGPUDevice(size_t memoryRequired, const std::string &name) const
+std::vector<LLModel::GPUDevice> LLamaModel::availableGPUDevices(size_t memoryRequired)
 {
 #if defined(GGML_USE_VULKAN) || defined(GGML_USE_CUDA)
     auto devices = availableGPUDevices(memoryRequired);
@@ -863,15 +962,37 @@ bool LLamaModel::initializeGPUDevice(size_t memoryRequired, const std::string &n
         d_ptr->deviceName = device.name;
         ggml_vk_device_destroy(&device);
         return true;
+#if defined(GGML_USE_KOMPUTE)
+    std::vector<ggml_vk_device> vkDevices = ggml_vk_available_devices(memoryRequired);
+
+    std::vector<LLModel::GPUDevice> devices;
+    for(const auto& vkDevice : vkDevices) {
+        LLModel::GPUDevice device;
+        device.index = vkDevice.index;
+        device.type = vkDevice.type;
+        device.heapSize = vkDevice.heapSize;
+        device.name = vkDevice.name;
+        device.vendor = vkDevice.vendor;
+
+        devices.push_back(device);
     }
+
+    return devices;
 #else
-    (void)memoryRequired;
-    (void)name;
+    return std::vector<LLModel::GPUDevice>();
 #endif
-    return false;
 }
 
-bool LLamaModel::initializeGPUDevice(int device, std::string *unavail_reason) const
+bool LLamaModel::initializeGPUDevice(size_t memoryRequired, const std::string& device)
+{
+#if defined(GGML_USE_KOMPUTE)
+    return ggml_vk_init_device(memoryRequired, device);
+#else
+    return false;
+#endif
+}
+
+bool LLamaModel::initializeGPUDevice(const LLModel::GPUDevice &device)
 {
 #if defined(GGML_USE_KOMPUTE) || defined(GGML_USE_VULKAN) || defined(GGML_USE_CUDA)
     (void)unavail_reason;
@@ -885,6 +1006,24 @@ bool LLamaModel::initializeGPUDevice(int device, std::string *unavail_reason) co
     if (unavail_reason) {
         *unavail_reason = "built without a GPU backend";
     }
+#if defined(GGML_USE_KOMPUTE)
+    ggml_vk_device vkDevice;
+    vkDevice.index = device.index;
+    vkDevice.type = device.type;
+    vkDevice.heapSize = device.heapSize;
+    vkDevice.name = device.name;
+    vkDevice.vendor = device.vendor;
+    return ggml_vk_init_device(vkDevice);
+#else
+    return false;
+#endif
+}
+
+bool LLamaModel::initializeGPUDevice(int device)
+{
+#if defined(GGML_USE_KOMPUTE)
+    return ggml_vk_init_device(device);
+#else
     return false;
 #endif
 }
@@ -897,6 +1036,10 @@ bool LLamaModel::usingGPUDevice() const
     bool usingGPU = llama_model_using_gpu(d_ptr->model);
 #ifdef GGML_USE_KOMPUTE
     assert(!usingGPU || ggml_vk_has_device());
+#if defined(GGML_USE_KOMPUTE)
+    return ggml_vk_has_device();
+#else
+    return false;
 #endif
     return usingGPU;
 }
@@ -1333,6 +1476,42 @@ DLL_EXPORT LLModel *construct()
 #ifdef GGML_USE_CUDA
     ggml_backend_cuda_log_set_callback([](auto l, auto t, auto u) { llama_log_callback(l, t, u, true); }, nullptr);
 #endif
+DLL_EXPORT bool magic_match(std::istream& f) {
+    // Check magic
+    uint32_t magic = 0;
+    f.read(reinterpret_cast<char*>(&magic), sizeof(magic));
+    if (magic != 0x67676a74) return false;
+    // Check version
+    uint32_t version = 0;
+    f.read(reinterpret_cast<char*>(&version), sizeof(version));
+    if (!(version LLAMA_VERSIONS)) {
+        return false;
+    }
+    llama_file_hparams hparams;
+    f.read(reinterpret_cast<char*>(&hparams), sizeof(hparams));
+    if (!(hparams.n_vocab >= 32000 && hparams.n_vocab <= 32100)) {
+        return false; // not a llama.
+    }
+#ifdef GGML_USE_METAL
+    // Check quant supported on metal
+    // skip fields
+    switch(hparams.ftype) {
+        // currently supported on Metal https://github.com/ggerganov/llama.cpp/blob/ae9663f1887513e152839e91f61c513075a19422/ggml-metal.m#L51-L55
+        case LLAMA_FTYPE_MOSTLY_F16:
+        case LLAMA_FTYPE_MOSTLY_Q2_K:
+        case LLAMA_FTYPE_MOSTLY_Q4_0:
+        case LLAMA_FTYPE_MOSTLY_Q6_K:
+        case LLAMA_FTYPE_MOSTLY_Q4_K_S:
+        case LLAMA_FTYPE_MOSTLY_Q4_K_M:
+            return true;
+        default: // unsupported quant-type for Metal
+            return false;
+    }
+#endif
+    return true;
+}
+
+DLL_EXPORT LLModel *construct() {
     return new LLamaModel;
 }
 }

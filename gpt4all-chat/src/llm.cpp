@@ -8,6 +8,13 @@
 #include <QFileInfo>
 #include <QGlobalStatic>
 #include <QNetworkInformation>
+#include "../gpt4all-backend/sysinfo.h"
+#include "../gpt4all-backend/llmodel.h"
+#include "network.h"
+
+#include <QCoreApplication>
+#include <QDir>
+#include <QFile>
 #include <QProcess>
 #include <QSettings>
 #include <QUrl>
@@ -29,6 +36,8 @@
 using namespace Qt::Literals::StringLiterals;
 
 
+#include <fstream>
+
 class MyLLM: public LLM { };
 Q_GLOBAL_STATIC(MyLLM, llmInstance)
 LLM *LLM::globalInstance()
@@ -38,14 +47,35 @@ LLM *LLM::globalInstance()
 
 LLM::LLM()
     : QObject{nullptr}
-    , m_compatHardware(LLModel::Implementation::hasSupportedCPU())
+    , m_compatHardware(true)
 {
-    QNetworkInformation::loadDefaultBackend();
-    auto * netinfo = QNetworkInformation::instance();
-    if (netinfo) {
-        connect(netinfo, &QNetworkInformation::reachabilityChanged,
-            this, &LLM::isNetworkOnlineChanged);
-    }
+    QString llmodelSearchPaths = QCoreApplication::applicationDirPath();
+    const QString libDir = QCoreApplication::applicationDirPath() + "/../lib/";
+    if (directoryExists(libDir))
+        llmodelSearchPaths += ";" + libDir;
+#if defined(Q_OS_MAC)
+    const QString binDir = QCoreApplication::applicationDirPath() + "/../../../";
+    if (directoryExists(binDir))
+        llmodelSearchPaths += ";" + binDir;
+    const QString frameworksDir = QCoreApplication::applicationDirPath() + "/../Frameworks/";
+    if (directoryExists(frameworksDir))
+        llmodelSearchPaths += ";" + frameworksDir;
+#endif
+    LLModel::Implementation::setImplementationsSearchPath(llmodelSearchPaths.toStdString());
+
+#if defined(__x86_64__)
+    #ifndef _MSC_VER
+        const bool minimal(__builtin_cpu_supports("avx"));
+    #else
+        int cpuInfo[4];
+        __cpuid(cpuInfo, 1);
+        const bool minimal(cpuInfo[2] & (1 << 28));
+    #endif
+#else
+    const bool minimal = true; // Don't know how to handle non-x86_64
+#endif
+
+    m_compatHardware = minimal;
 }
 
 bool LLM::hasSettingsAccess() const
@@ -62,6 +92,7 @@ bool LLM::checkForUpdates() const
     return QDesktopServices::openUrl(QUrl("https://github.com/nomic-ai/gpt4all/releases"));
 #else
     Network::globalInstance()->trackEvent("check_for_updates");
+    Network::globalInstance()->sendCheckForUpdates();
 
 #if defined(Q_OS_LINUX)
     QString tool = u"maintenancetool"_s;
@@ -82,7 +113,7 @@ bool LLM::checkForUpdates() const
 #endif
 }
 
-bool LLM::directoryExists(const QString &path)
+bool LLM::directoryExists(const QString &path) const
 {
     const QUrl url(path);
     const QString localFilePath = url.isLocalFile() ? url.toLocalFile() : path;
@@ -90,7 +121,7 @@ bool LLM::directoryExists(const QString &path)
     return info.exists() && info.isDir();
 }
 
-bool LLM::fileExists(const QString &path)
+bool LLM::fileExists(const QString &path) const
 {
     const QUrl url(path);
     const QString localFilePath = url.isLocalFile() ? url.toLocalFile() : path;

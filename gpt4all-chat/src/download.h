@@ -40,7 +40,7 @@ public:
     HashAndSaveFile();
 
 public Q_SLOTS:
-    void hashAndSave(const QString &hash, QCryptographicHash::Algorithm a, const QString &saveFilePath,
+    void hashAndSave(const QString &hash, const QString &saveFilePath,
         QFile *tempFile, QNetworkReply *modelReply);
 
 Q_SIGNALS:
@@ -90,7 +90,7 @@ private Q_SLOTS:
 Q_SIGNALS:
     void releaseInfoChanged();
     void hasNewerReleaseChanged();
-    void requestHashAndSave(const QString &hash, QCryptographicHash::Algorithm a, const QString &saveFilePath,
+    void requestHashAndSave(const QString &hash, const QString &saveFilePath,
         QFile *tempFile, QNetworkReply *modelReply);
     void latestNewsChanged();
     void toastMessage(const QString &message);
@@ -98,16 +98,12 @@ Q_SIGNALS:
 private:
     void parseReleaseJsonFile(const QByteArray &jsonData);
     QString incompleteDownloadPath(const QString &modelFile);
-    bool hasRetry(const QString &filename) const;
-    bool shouldRetry(const QString &filename);
-    void clearRetry(const QString &filename);
 
     HashAndSaveFile *m_hashAndSave;
     QMap<QString, ReleaseInfo> m_releaseMap;
     QString m_latestNews;
     QNetworkAccessManager m_networkManager;
     QMap<QNetworkReply*, QFile*> m_activeDownloads;
-    QHash<QString, int> m_activeRetries;
     QDateTime m_startTime;
 
 private:

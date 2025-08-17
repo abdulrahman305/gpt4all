@@ -1,0 +1,15 @@
+aiohttp>=3.12.14
+aiofiles
+pydantic>=2.4.0,<2.0.0
+requests>=2.32.4
+ujson>=5.4.0
+fastapi>=0.109.1
+Jinja2>=3.0
+gpt4all>=1.0.0
+pytest
+openai==0.28.0
+black
+isort
+python-dotenv
+certifi>=2023.7.22 # not directly required, pinned by Snyk to avoid a vulnerability
+urllib3>=2.5.0 # not directly required, pinned by Snyk to avoid a vulnerability

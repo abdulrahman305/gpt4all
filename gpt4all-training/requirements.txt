@@ -3,7 +3,7 @@ datasets
 einops
 torchmetrics
 evaluate
-transformers>=4.28.0
+transformers>=4.52.0
 wandb
 peft
 nodelist-inflator
@@ -13,3 +13,13 @@ jsonlines
 nomic
 scikit-learn
 matplotlib
+pydantic>=2.4.0 # not directly required, pinned by Snyk to avoid a vulnerability
+fonttools>=4.43.0 # not directly required, pinned by Snyk to avoid a vulnerability
+numpy>=1.22.2 # not directly required, pinned by Snyk to avoid a vulnerability
+pillow>=10.3.0 # not directly required, pinned by Snyk to avoid a vulnerability
+pyarrow>=14.0.1 # not directly required, pinned by Snyk to avoid a vulnerability
+setuptools>=70.0.0 # not directly required, pinned by Snyk to avoid a vulnerability
+torch>=2.2.0 # not directly required, pinned by Snyk to avoid a vulnerability
+wheel>=0.38.0 # not directly required, pinned by Snyk to avoid a vulnerability
+zipp>=3.19.1 # not directly required, pinned by Snyk to avoid a vulnerability
+aiohttp>=3.12.14 # not directly required, pinned by Snyk to avoid a vulnerability

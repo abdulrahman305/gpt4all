@@ -189,8 +189,7 @@ void Download::downloadModel(const QString &modelFile)
         const QString error
             = u"ERROR: Could not open temp file: %1 %2"_s.arg(tempFile->fileName(), modelFile);
         qWarning() << error;
-        clearRetry(modelFile);
-        ModelList::globalInstance()->updateDataByFilename(modelFile, {{ ModelList::DownloadErrorRole, error }});
+        ModelList::globalInstance()->updateDataByFilename(modelFile, ModelList::DownloadErrorRole, error);
         return;
     }
     tempFile->flush();
@@ -209,10 +208,12 @@ void Download::downloadModel(const QString &modelFile)
         return;
     }
 
-    ModelList::globalInstance()->updateDataByFilename(modelFile, {{ ModelList::DownloadingRole, true }});
+    ModelList::globalInstance()->updateDataByFilename(modelFile, ModelList::DownloadingRole, true);
     ModelInfo info = ModelList::globalInstance()->modelInfoByFilename(modelFile);
     QString url = !info.url().isEmpty() ? info.url() : "http://gpt4all.io/models/gguf/" + modelFile;
     Network::globalInstance()->trackEvent("download_started", { {"model", modelFile} });
+    QString url = !info.url.isEmpty() ? info.url : "http://gpt4all.io/models/" + modelFile;
+    Network::globalInstance()->sendDownloadStarted(modelFile);
     QNetworkRequest request(url);
     request.setAttribute(QNetworkRequest::User, modelFile);
     request.setRawHeader("range", u"bytes=%1-"_s.arg(tempFile->pos()).toUtf8());
@@ -222,7 +223,6 @@ void Download::downloadModel(const QString &modelFile)
     QNetworkReply *modelReply = m_networkManager.get(request);
     connect(qGuiApp, &QCoreApplication::aboutToQuit, modelReply, &QNetworkReply::abort);
     connect(modelReply, &QNetworkReply::downloadProgress, this, &Download::handleDownloadProgress);
-    connect(modelReply, &QNetworkReply::errorOccurred, this, &Download::handleErrorOccurred);
     connect(modelReply, &QNetworkReply::finished, this, &Download::handleModelDownloadFinished);
     connect(modelReply, &QNetworkReply::readyRead, this, &Download::handleReadyRead);
     m_activeDownloads.insert(modelReply, tempFile);
@@ -245,7 +245,7 @@ void Download::cancelDownload(const QString &modelFile)
             tempFile->deleteLater();
             m_activeDownloads.remove(modelReply);
 
-            ModelList::globalInstance()->updateDataByFilename(modelFile, {{ ModelList::DownloadingRole, false }});
+            ModelList::globalInstance()->updateDataByFilename(modelFile, ModelList::DownloadingRole, false);
             break;
         }
     }
@@ -262,17 +262,8 @@ void Download::installModel(const QString &modelFile, const QString &apiKey)
     QString filePath = MySettings::globalInstance()->modelPath() + modelFile;
     QFile file(filePath);
     if (file.open(QIODeviceBase::WriteOnly | QIODeviceBase::Text)) {
-
-        QJsonObject obj;
-        QString modelName(modelFile);
-        modelName.remove(0, 8); // strip "gpt4all-" prefix
-        modelName.chop(7); // strip ".rmodel" extension
-        obj.insert("apiKey", apiKey);
-        obj.insert("modelName", modelName);
-        QJsonDocument doc(obj);
-
         QTextStream stream(&file);
-        stream << doc.toJson();
+        stream << apiKey;
         file.close();
         ModelList::globalInstance()->updateModelsFromDirectory();
         emit toastMessage(tr("Model \"%1\" is installed successfully.").arg(modelName));
@@ -324,8 +315,6 @@ void Download::installCompatibleModel(const QString &modelName, const QString &a
         ModelList::globalInstance()->updateModelsFromDirectory();
         emit toastMessage(tr("Model \"%1 (%2)\" is installed successfully.").arg(modelName, baseUrl));
     }
-
-    ModelList::globalInstance()->updateDataByFilename(modelFile, {{ ModelList::InstalledRole, true }});
 }
 
 void Download::removeModel(const QString &modelFile)
@@ -336,7 +325,6 @@ void Download::removeModel(const QString &modelFile)
         incompleteFile.remove();
     }
 
-    bool shouldRemoveInstalled = false;
     QFile file(filePath);
     if (file.exists()) {
         const ModelInfo info = ModelList::globalInstance()->modelInfoByFilename(modelFile);
@@ -345,21 +333,16 @@ void Download::removeModel(const QString &modelFile)
         if (shouldRemoveInstalled)
             ModelList::globalInstance()->removeInstalled(info);
         Network::globalInstance()->trackEvent("remove_model", { {"model", modelFile} });
+        Network::globalInstance()->sendRemoveModel(modelFile);
         file.remove();
         emit toastMessage(tr("Model \"%1\" is removed.").arg(info.name()));
     }
 
-    if (!shouldRemoveInstalled) {
-        QVector<QPair<int, QVariant>> data {
-            { ModelList::InstalledRole, false },
-            { ModelList::BytesReceivedRole, 0 },
-            { ModelList::BytesTotalRole, 0 },
-            { ModelList::TimestampRole, 0 },
-            { ModelList::SpeedRole, QString() },
-            { ModelList::DownloadErrorRole, QString() },
-        };
-        ModelList::globalInstance()->updateDataByFilename(modelFile, data);
-    }
+    ModelList::globalInstance()->updateDataByFilename(modelFile, ModelList::BytesReceivedRole, 0);
+    ModelList::globalInstance()->updateDataByFilename(modelFile, ModelList::BytesTotalRole, 0);
+    ModelList::globalInstance()->updateDataByFilename(modelFile, ModelList::TimestampRole, 0);
+    ModelList::globalInstance()->updateDataByFilename(modelFile, ModelList::SpeedRole, QString());
+    ModelList::globalInstance()->updateDataByFilename(modelFile, ModelList::DownloadErrorRole, QString());
 }
 
 void Download::handleSslErrors(QNetworkReply *reply, const QList<QSslError> &errors)
@@ -461,18 +444,7 @@ void Download::handleErrorOccurred(QNetworkReply::NetworkError code)
     if (!modelReply)
         return;
 
-    // This occurs when the user explicitly cancels the download
-    if (code == QNetworkReply::OperationCanceledError)
-        return;
-
     QString modelFilename = modelReply->request().attribute(QNetworkRequest::User).toString();
-    if (shouldRetry(modelFilename)) {
-        downloadModel(modelFilename);
-        return;
-    }
-
-    clearRetry(modelFilename);
-
     const QString error
         = u"ERROR: Network error occurred attempting to download %1 code: %2 errorString %3"_s
             .arg(modelFilename)
@@ -485,6 +457,8 @@ void Download::handleErrorOccurred(QNetworkReply::NetworkError code)
         {"code", (int)code},
         {"error", modelReply->errorString()},
     });
+    ModelList::globalInstance()->updateDataByFilename(modelFilename, ModelList::DownloadErrorRole, error);
+    Network::globalInstance()->sendDownloadError(modelFilename, (int)code, modelReply->errorString());
     cancelDownload(modelFilename);
 }
 
@@ -522,13 +496,10 @@ void Download::handleDownloadProgress(qint64 bytesReceived, qint64 bytesTotal)
     else
         speedText = QString::number(static_cast<double>(speed / (1024.0 * 1024.0)), 'f', 2) + " MB/s";
 
-    QVector<QPair<int, QVariant>> data {
-        { ModelList::BytesReceivedRole, currentBytesReceived },
-        { ModelList::BytesTotalRole, bytesTotal },
-        { ModelList::SpeedRole, speedText },
-        { ModelList::TimestampRole, currentUpdate },
-    };
-    ModelList::globalInstance()->updateDataByFilename(modelFilename, data);
+    ModelList::globalInstance()->updateDataByFilename(modelFilename, ModelList::BytesReceivedRole, currentBytesReceived);
+    ModelList::globalInstance()->updateDataByFilename(modelFilename, ModelList::BytesTotalRole, bytesTotal);
+    ModelList::globalInstance()->updateDataByFilename(modelFilename, ModelList::SpeedRole, speedText);
+    ModelList::globalInstance()->updateDataByFilename(modelFilename, ModelList::TimestampRole, currentUpdate);
 }
 
 HashAndSaveFile::HashAndSaveFile()
@@ -539,8 +510,8 @@ HashAndSaveFile::HashAndSaveFile()
     m_hashAndSaveThread.start();
 }
 
-void HashAndSaveFile::hashAndSave(const QString &expectedHash, QCryptographicHash::Algorithm a,
-    const QString &saveFilePath, QFile *tempFile, QNetworkReply *modelReply)
+void HashAndSaveFile::hashAndSave(const QString &expectedHash, const QString &saveFilePath,
+        QFile *tempFile, QNetworkReply *modelReply)
 {
     Q_ASSERT(!tempFile->isOpen());
     QString modelFilename = modelReply->request().attribute(QNetworkRequest::User).toString();
@@ -554,14 +525,15 @@ void HashAndSaveFile::hashAndSave(const QString &expectedHash, QCryptographicHas
         return;
     }
 
-    QCryptographicHash hash(a);
+    QCryptographicHash hash(QCryptographicHash::Md5);
     while(!tempFile->atEnd())
         hash.addData(tempFile->read(16384));
-    if (hash.result().toHex() != expectedHash.toLatin1()) {
+    if (hash.result().toHex() != expectedHash) {
         tempFile->close();
         const QString error
             = u"ERROR: Download error hash did not match: %1 != %2 for %3"_s
                 .arg(hash.result().toHex(), expectedHash.toLatin1(), modelFilename);
+            = QString("ERROR: Download error MD5SUM did not match: %1 != %2 for %3").arg(hash.result().toHex()).arg(expectedHash).arg(modelFilename);
         qWarning() << error;
         tempFile->remove();
         emit hashAndSaveFinished(false, error, tempFile, modelReply);
@@ -575,7 +547,6 @@ void HashAndSaveFile::hashAndSave(const QString &expectedHash, QCryptographicHas
     // but will only work if the destination is on the same filesystem
     if (tempFile->rename(saveFilePath)) {
         emit hashAndSaveFinished(true, QString(), tempFile, modelReply);
-        ModelList::globalInstance()->updateModelsFromDirectory();
         return;
     }
 
@@ -606,9 +577,8 @@ void HashAndSaveFile::hashAndSave(const QString &expectedHash, QCryptographicHas
         qWarning() << errorString;
         tempFile->close();
         emit hashAndSaveFinished(false, errorString, tempFile, modelReply);
+        return;
     }
-
-    ModelList::globalInstance()->updateModelsFromDirectory();
 }
 
 void Download::handleModelDownloadFinished()
@@ -627,17 +597,10 @@ void Download::handleModelDownloadFinished()
         qWarning() << errorString;
         modelReply->deleteLater();
         tempFile->deleteLater();
-        if (!hasRetry(modelFilename)) {
-            QVector<QPair<int, QVariant>> data {
-                { ModelList::DownloadingRole, false },
-                { ModelList::DownloadErrorRole, errorString },
-            };
-            ModelList::globalInstance()->updateDataByFilename(modelFilename, data);
-        }
+        ModelList::globalInstance()->updateDataByFilename(modelFilename, ModelList::DownloadingRole, false);
+        ModelList::globalInstance()->updateDataByFilename(modelFilename, ModelList::DownloadErrorRole, errorString);
         return;
     }
-
-    clearRetry(modelFilename);
 
     // The hash and save needs the tempFile closed
     tempFile->close();
@@ -650,13 +613,10 @@ void Download::handleModelDownloadFinished()
     }
 
     // Notify that we are calculating hash
-    ModelList::globalInstance()->updateDataByFilename(modelFilename, {{ ModelList::CalcHashRole, true }});
-    QByteArray hash =  ModelList::globalInstance()->modelInfoByFilename(modelFilename).hash;
-    ModelInfo::HashAlgorithm hashAlgorithm =  ModelList::globalInstance()->modelInfoByFilename(modelFilename).hashAlgorithm;
+    ModelList::globalInstance()->updateDataByFilename(modelFilename, ModelList::CalcHashRole, true);
+    QByteArray md5sum =  ModelList::globalInstance()->modelInfoByFilename(modelFilename).md5sum;
     const QString saveFilePath = MySettings::globalInstance()->modelPath() + modelFilename;
-    emit requestHashAndSave(hash,
-        (hashAlgorithm == ModelInfo::Md5 ? QCryptographicHash::Md5 : QCryptographicHash::Sha256),
-        saveFilePath, tempFile, modelReply);
+    emit requestHashAndSave(md5sum, saveFilePath, tempFile, modelReply);
 }
 
 void Download::handleHashAndSaveFinished(bool success, const QString &error,
@@ -672,19 +632,16 @@ void Download::handleHashAndSaveFinished(bool success, const QString &error,
         { ModelList::DownloadingRole, false },
     };
 
+    Network::globalInstance()->sendDownloadFinished(modelFilename, success);
+    ModelList::globalInstance()->updateDataByFilename(modelFilename, ModelList::CalcHashRole, false);
     modelReply->deleteLater();
     tempFile->deleteLater();
 
-    if (!success) {
-        data.append({ ModelList::DownloadErrorRole, error });
-    } else {
-        data.append({ ModelList::DownloadErrorRole, QString() });
-        ModelInfo info = ModelList::globalInstance()->modelInfoByFilename(modelFilename);
-        if (info.isDiscovered())
-            ModelList::globalInstance()->updateDiscoveredInstalled(info);
-    }
-
-    ModelList::globalInstance()->updateDataByFilename(modelFilename, data);
+    ModelList::globalInstance()->updateDataByFilename(modelFilename, ModelList::DownloadingRole, false);
+    if (!success)
+        ModelList::globalInstance()->updateDataByFilename(modelFilename, ModelList::DownloadErrorRole, error);
+    else
+        ModelList::globalInstance()->updateDataByFilename(modelFilename, ModelList::DownloadErrorRole, QString());
 }
 
 void Download::handleReadyRead()
