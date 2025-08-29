@@ -1,3 +1,7 @@
+"""
+main.py - Auto-documented by GitOps Agent
+"""
+
 import logging
 import os
 

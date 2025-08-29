@@ -1,3 +1,7 @@
+"""
+test_embed_timings.py - Auto-documented by GitOps Agent
+"""
+
 #!/usr/bin/env python3
 import sys
 import time

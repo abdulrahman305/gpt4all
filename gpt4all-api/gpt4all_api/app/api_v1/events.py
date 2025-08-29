@@ -1,3 +1,7 @@
+"""
+events.py - Auto-documented by GitOps Agent
+"""
+
 import logging
 
 from api_v1.settings import settings

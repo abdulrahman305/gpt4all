@@ -1,3 +1,7 @@
+"""
+clean.py - Auto-documented by GitOps Agent
+"""
+
 import numpy as np
 import glob
 import os

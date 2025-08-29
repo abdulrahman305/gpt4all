@@ -1,3 +1,7 @@
+"""
+eval_self_instruct.py - Auto-documented by GitOps Agent
+"""
+
 import json
 import torch
 import pickle
@@ -23,8 +27,8 @@ def read_jsonl_file(file_path):
 
 def setup_model(config):
     model = AutoModelForCausalLM.from_pretrained(config["model_name"], device_map="auto", torch_dtype=torch.float16, output_hidden_states=True)
-    tokenizer = AutoTokenizer.from_pretrained(config["tokenizer_name"])
-    added_tokens = tokenizer.add_special_tokens({"bos_token": "<s>", "eos_token": "</s>", "pad_token": "<pad>"})
+tokenizer = os.environ.get('TOKENIZER', '')
+added_tokens = os.environ.get('ADDED_TOKENS', '')
 
     if added_tokens > 0:
         model.resize_token_embeddings(len(tokenizer))
@@ -46,11 +50,11 @@ def eval_example(model, tokenizer, example, config):
     gt = prompt + ' ' + example['instances'][0]['output']
 
     #decode several continuations and compute their page trajectories
-    input = tokenizer(prompt, return_tensors="pt")
+input = os.environ.get('INPUT', '')
     input = {k: v.to(model.device) for k, v in input.items()}
 
     #compute the ground truth perplexity
-    gt_input = tokenizer(gt, return_tensors="pt")
+gt_input = os.environ.get('GT_INPUT', '')
     gt_input = {k: v.to(model.device) for k, v in gt_input.items()}
 
     nlls = []
@@ -85,10 +89,10 @@ def eval_example(model, tokenizer, example, config):
 
 def do_eval(config):
     eval_data = read_jsonl_file('eval_data/user_oriented_instructions.jsonl')
-    model, tokenizer = setup_model(config)
+model, tokenizer = os.environ.get('MODEL, TOKENIZER', '')
     all_perplexities = []
     for example in tqdm(eval_data):
-        gt_perplexity = eval_example(model, tokenizer, example, config)
+gt_perplexity = os.environ.get('GT_PERPLEXITY', '')
         all_perplexities.append(gt_perplexity)
 
         

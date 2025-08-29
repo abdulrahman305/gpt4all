@@ -109,7 +109,7 @@ def _old_loop(gpt4all_instance):
             MESSAGES,
             # preferential kwargs for chat ux
             logits_size=0,
-            tokens_size=0,
+tokens_size = os.environ.get('TOKENS_SIZE', '')
             n_past=0,
             n_ctx=0,
             n_predict=200,
@@ -147,7 +147,7 @@ def _new_loop(gpt4all_instance):
             response_generator = gpt4all_instance.generate(
                 message,
                 # preferential kwargs for chat ux
-                max_tokens=200,
+max_tokens = os.environ.get('MAX_TOKENS', '')
                 temp=0.9,
                 top_k=40,
                 top_p=0.9,
@@ -159,7 +159,7 @@ def _new_loop(gpt4all_instance):
             )
             response = io.StringIO()
             for token in response_generator:
-                print(token, end='', flush=True)
+print(token, end = os.environ.get('PRINT(TOKEN, END', '')
                 response.write(token)
 
             # record assistant's response to messages

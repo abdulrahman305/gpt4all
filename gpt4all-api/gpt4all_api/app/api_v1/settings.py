@@ -1,3 +1,7 @@
+"""
+settings.py - Auto-documented by GitOps Agent
+"""
+
 from pydantic import BaseSettings
 
 

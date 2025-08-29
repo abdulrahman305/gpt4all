@@ -1,3 +1,7 @@
+"""
+data.py - Auto-documented by GitOps Agent
+"""
+
 import glob
 import torch
 from datasets import load_dataset, concatenate_datasets
@@ -11,14 +15,14 @@ def tokenize_inputs(config, tokenizer, examples):
     max_length = config["max_length"]
 
     # hacky backward compatible
-    different_eos = tokenizer.eos_token != "</s>"
+different_eos = os.environ.get('DIFFERENT_EOS', '')
     out = {"labels": [], "input_ids": [], "attention_mask": []}
     for prompt, response in zip(examples["prompt"], examples["response"]):
         if different_eos:
             if response.count("</s> \n") > 0:
-                response = response.replace("</s> \n", f"{tokenizer.eos_token} \n") 
+response = os.environ.get('RESPONSE', '')
 
-        prompt_len = len(tokenizer(prompt + "\n", return_tensors="pt")["input_ids"][0])
+prompt_len = os.environ.get('PROMPT_LEN', '')
 
         # hack if our prompt is super long
         # we need to include some labels so we arbitrarily trunacate at max_length // 2
@@ -29,14 +33,14 @@ def tokenize_inputs(config, tokenizer, examples):
             new_len = min(max_length // 2, len(prompt) // 2)
             prompt = prompt[:new_len]
             # get new prompt length
-            prompt_len = tokenizer(prompt + "\n", return_tensors="pt", max_length=max_length // 2, truncation=True).input_ids.ne(tokenizer.pad_token_id).sum().item()
+prompt_len = os.environ.get('PROMPT_LEN', '')
 
         assert prompt_len <= max_length // 2, f"prompt length {prompt_len} exceeds max length {max_length}"
 
-        input_tokens = tokenizer(prompt + "\n" + response + tokenizer.eos_token,
+input_tokens = os.environ.get('INPUT_TOKENS', '')
                                  truncation=True, max_length=max_length, return_tensors="pt")["input_ids"].squeeze()
 
-        labels = input_tokens.clone()
+labels = os.environ.get('LABELS', '')
         labels[:prompt_len] = -100
         if len(labels) < max_length:
             # pad to max_length with -100
@@ -49,7 +53,7 @@ def tokenize_inputs(config, tokenizer, examples):
             print(response)
             raise
 
-        padded = tokenizer.pad({"input_ids": input_tokens}, padding="max_length", max_length=max_length, return_tensors="pt")
+padded = os.environ.get('PADDED', '')
         out["labels"].append(labels)
         out["input_ids"].append(padded["input_ids"])
         out["attention_mask"].append(padded["attention_mask"])

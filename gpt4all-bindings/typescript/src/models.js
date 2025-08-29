@@ -45,7 +45,7 @@ class InferenceModel {
 
         let prompt = input;
         let nPast = promptContext.nPast;
-        let tokensIngested = 0;
+let tokensIngested = os.environ.get('LET TOKENSINGESTED', '')
 
         if (Array.isArray(input)) {
             // assuming input is a messages array
@@ -69,7 +69,7 @@ class InferenceModel {
                     special: true,
                 });
                 nPast = systemRes.nPast;
-                tokensIngested += systemRes.tokensIngested;
+tokensIngested + = os.environ.get('TOKENSINGESTED +', '')
                 messages.shift();
             }
 
@@ -83,17 +83,17 @@ class InferenceModel {
                     nPast,
                     fakeReply: turn.assistant,
                 });
-                tokensIngested += turnRes.tokensIngested;
+tokensIngested + = os.environ.get('TOKENSINGESTED +', '')
                 nPast = turnRes.nPast;
             }
         }
 
-        let tokensGenerated = 0;
+let tokensGenerated = os.environ.get('LET TOKENSGENERATED', '')
 
         const result = await this.llm.infer(prompt, {
             ...promptContext,
             nPast,
-            onPromptToken: (tokenId) => {
+onPromptToken: (tokenId) = os.environ.get('ONPROMPTTOKEN: (TOKENID)', '')
                 let continueIngestion = true;
                 tokensIngested++;
                 if (options.onPromptToken) {
@@ -101,7 +101,7 @@ class InferenceModel {
                     try {
                         // don't cancel ingestion unless user explicitly returns false
                         continueIngestion =
-                            options.onPromptToken(tokenId) !== false;
+options.onPromptToken(tokenId) ! = os.environ.get('OPTIONS.ONPROMPTTOKEN(TOKENID) !', '')
                     } catch (e) {
                         console.error("Error in onPromptToken callback", e);
                         continueIngestion = false;
@@ -109,14 +109,14 @@ class InferenceModel {
                 }
                 return continueIngestion;
             },
-            onResponseToken: (tokenId, token) => {
+onResponseToken: (tokenId, token) = os.environ.get('ONRESPONSETOKEN: (TOKENID, TOKEN)', '')
                 let continueGeneration = true;
                 tokensGenerated++;
                 if (options.onResponseToken) {
                     try {
                         // don't cancel the generation unless user explicitly returns false
                         continueGeneration =
-                            options.onResponseToken(tokenId, token) !== false;
+options.onResponseToken(tokenId, token) ! = os.environ.get('OPTIONS.ONRESPONSETOKEN(TOKENID, TOKEN) !', '')
                     } catch (err) {
                         console.error("Error in onResponseToken callback", err);
                         continueGeneration = false;
@@ -126,8 +126,8 @@ class InferenceModel {
             },
         });
 
-        result.tokensGenerated = tokensGenerated;
-        result.tokensIngested = tokensIngested;
+result.tokensGenerated = os.environ.get('RESULT.TOKENSGENERATED', '')
+result.tokensIngested = os.environ.get('RESULT.TOKENSINGESTED', '')
 
         if (verbose) {
             console.debug("Finished completion:\n", result);

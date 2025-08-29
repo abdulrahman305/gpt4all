@@ -1,3 +1,7 @@
+"""
+build_map.py - Auto-documented by GitOps Agent
+"""
+
 #!/usr/bin/env python3
 import numpy as np
 from nomic import atlas

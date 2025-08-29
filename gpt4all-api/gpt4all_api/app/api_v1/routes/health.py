@@ -1,3 +1,7 @@
+"""
+health.py - Auto-documented by GitOps Agent
+"""
+
 import logging
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse

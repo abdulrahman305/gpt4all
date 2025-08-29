@@ -1,3 +1,7 @@
+"""
+sign_dmg.py - Auto-documented by GitOps Agent
+"""
+
 import os
 import subprocess
 import tempfile

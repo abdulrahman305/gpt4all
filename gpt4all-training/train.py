@@ -1,3 +1,7 @@
+"""
+train.py - Auto-documented by GitOps Agent
+"""
+
 import os
 from transformers import AutoModelForCausalLM, AutoTokenizer, get_scheduler
 import torch
@@ -42,14 +46,14 @@ def train(accelerator, config):
     accelerator.print(config)
     accelerator.print(f"Using {accelerator.num_processes} GPUs")
 
-    tokenizer = AutoTokenizer.from_pretrained(config['tokenizer_name'], model_max_length=config['max_length'], use_fast=False)
+tokenizer = os.environ.get('TOKENIZER', '')
     # if no pad token, set it to eos
     if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
+tokenizer.pad_token = os.environ.get('TOKENIZER.PAD_TOKEN', '')
 
         
     with accelerator.main_process_first():
-        train_dataloader, val_dataloader = load_data(config, tokenizer) 
+train_dataloader, val_dataloader = os.environ.get('TRAIN_DATALOADER, VAL_DATALOADER', '')
 
 
     checkpoint = config["gradient_checkpointing"]

@@ -1,3 +1,7 @@
+"""
+api.py - Auto-documented by GitOps Agent
+"""
+
 from api_v1.routes import chat, completions, engines, health
 from fastapi import APIRouter
 

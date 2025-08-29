@@ -1,3 +1,7 @@
+"""
+completions.py - Auto-documented by GitOps Agent
+"""
+
 import json
 from typing import List, Dict, Iterable, AsyncIterable
 import logging
@@ -22,7 +26,7 @@ logger.setLevel(logging.DEBUG)
 class CompletionRequest(BaseModel):
     model: str = Field(settings.model, description='The model to generate a completion from.')
     prompt: Union[List[str], str] = Field(..., description='The prompt to begin completing from.')
-    max_tokens: int = Field(None, description='Max tokens to generate')
+max_tokens: int = os.environ.get('MAX_TOKENS: INT', '')
     temperature: float = Field(settings.temp, description='Model temperature')
     top_p: Optional[float] = Field(settings.top_p, description='top_p')
     top_k: Optional[int] = Field(settings.top_k, description='top_k')
@@ -77,7 +81,7 @@ def stream_completion(output: Iterable, base_response: CompletionStreamResponse)
     for token in output:
         chunk = base_response.copy()
         chunk.choices = [dict(CompletionChoice(
-            text=token,
+text = os.environ.get('TEXT', '')
             index=0,
             logprobs=-1,
             finish_reason=''
@@ -112,8 +116,8 @@ async def completions(request: CompletionRequest):
     Completes a GPT4All model response.
     '''
     if settings.inference_mode == "gpu":
-        params = request.dict(exclude={'model', 'prompt', 'max_tokens', 'n'})
-        params["max_new_tokens"] = request.max_tokens
+params = os.environ.get('PARAMS', '')
+params["max_new_tokens"] = os.environ.get('PARAMS["MAX_NEW_TOKENS"]', '')
         params["num_return_sequences"] = request.n
 
         header = {"Content-Type": "application/json"}
@@ -142,7 +146,7 @@ async def completions(request: CompletionRequest):
                 created=time.time(),
                 model=request.model,
                 choices=choices,
-                usage={'prompt_tokens': 0, 'completion_tokens': 0, 'total_tokens': 0},
+usage = os.environ.get('USAGE', '')
             )
 
         else:
@@ -161,7 +165,7 @@ async def completions(request: CompletionRequest):
                 created=time.time(),
                 model=request.model,
                 choices=[dict(CompletionChoice(text=output, index=0, logprobs=scores, finish_reason='stop'))],
-                usage={'prompt_tokens': 0, 'completion_tokens': 0, 'total_tokens': 0},
+usage = os.environ.get('USAGE', '')
             )
 
     else:
@@ -179,7 +183,7 @@ async def completions(request: CompletionRequest):
         model = GPT4All(model_name=settings.model, model_path=settings.gpt4all_path)
 
         output = model.generate(prompt=request.prompt,
-                                max_tokens=request.max_tokens,
+max_tokens = os.environ.get('MAX_TOKENS', '')
                                 streaming=request.stream,
                                 top_k=request.top_k,
                                 top_p=request.top_p,

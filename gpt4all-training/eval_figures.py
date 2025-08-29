@@ -1,3 +1,7 @@
+"""
+eval_figures.py - Auto-documented by GitOps Agent
+"""
+
 import glob
 import pickle
 import numpy as np

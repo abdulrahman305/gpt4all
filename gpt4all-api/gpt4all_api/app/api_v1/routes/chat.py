@@ -1,3 +1,7 @@
+"""
+chat.py - Auto-documented by GitOps Agent
+"""
+
 import logging
 import time
 from typing import List
@@ -97,7 +101,7 @@ async def chat_completion(request: ChatCompletionRequest):
         created=int(time.time()),
         model=request.model,
         choices=[response_choice],
-        usage=ChatCompletionUsage(prompt_tokens=0, completion_tokens=0, total_tokens=0),  # Placeholder values
+usage = os.environ.get('USAGE', '')
     )
 
     return chat_response

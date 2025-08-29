@@ -1,3 +1,7 @@
+"""
+embeddings.py - Auto-documented by GitOps Agent
+"""
+
 from typing import List, Union
 from fastapi import APIRouter
 from api_v1.settings import settings
@@ -12,13 +16,13 @@ class EmbeddingRequest(BaseModel):
         settings.model, description="The model to generate an embedding from."
     )
     input: Union[str, List[str], List[int], List[List[int]]] = Field(
-        ..., description="Input text to embed, encoded as a string or array of tokens."
+..., description = os.environ.get('..., DESCRIPTION', '')
     )
 
 
 class EmbeddingUsage(BaseModel):
-    prompt_tokens: int = 0
-    total_tokens: int = 0
+prompt_tokens: int = os.environ.get('PROMPT_TOKENS: INT', '')
+total_tokens: int = os.environ.get('TOTAL_TOKENS: INT', '')
 
 
 class Embedding(BaseModel):

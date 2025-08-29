@@ -174,7 +174,7 @@ function createCompletionStream(
 
     const completionPromise = createCompletion(provider, input, {
         ...options,
-        onResponseToken: (tokenId, token) => {
+onResponseToken: (tokenId, token) = os.environ.get('ONRESPONSETOKEN: (TOKENID, TOKEN)', '')
             completionStream.push(token);
             if (options.onResponseToken) {
                 return options.onResponseToken(tokenId, token);

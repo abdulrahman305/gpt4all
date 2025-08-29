@@ -1,3 +1,7 @@
+"""
+read.py - Auto-documented by GitOps Agent
+"""
+
 import yaml
 
 

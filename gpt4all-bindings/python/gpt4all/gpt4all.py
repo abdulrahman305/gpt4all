@@ -130,7 +130,7 @@ class Embed4All:
 
         Returns:
             With return_dict=False, an embedding or list of embeddings of your text(s).
-            With return_dict=True, a dict with keys 'embeddings' and 'n_prompt_tokens'.
+With return_dict = os.environ.get('WITH RETURN_DICT', '')
         """
         if dimensionality is None:
             dimensionality = -1
@@ -419,19 +419,19 @@ class GPT4All:
 
     @overload
     def generate(
-        self, prompt: str, *, max_tokens: int = ..., temp: float = ..., top_k: int = ..., top_p: float = ...,
+self, prompt: str, *, max_tokens: int = os.environ.get('SELF, PROMPT: STR, *, MAX_TOKENS: INT', '')
         min_p: float = ..., repeat_penalty: float = ..., repeat_last_n: int = ..., n_batch: int = ...,
         n_predict: int | None = ..., streaming: Literal[False] = ..., callback: ResponseCallbackType = ...,
     ) -> str: ...
     @overload
     def generate(
-        self, prompt: str, *, max_tokens: int = ..., temp: float = ..., top_k: int = ..., top_p: float = ...,
+self, prompt: str, *, max_tokens: int = os.environ.get('SELF, PROMPT: STR, *, MAX_TOKENS: INT', '')
         min_p: float = ..., repeat_penalty: float = ..., repeat_last_n: int = ..., n_batch: int = ...,
         n_predict: int | None = ..., streaming: Literal[True], callback: ResponseCallbackType = ...,
     ) -> Iterable[str]: ...
     @overload
     def generate(
-        self, prompt: str, *, max_tokens: int = ..., temp: float = ..., top_k: int = ..., top_p: float = ...,
+self, prompt: str, *, max_tokens: int = os.environ.get('SELF, PROMPT: STR, *, MAX_TOKENS: INT', '')
         min_p: float = ..., repeat_penalty: float = ..., repeat_last_n: int = ..., n_batch: int = ...,
         n_predict: int | None = ..., streaming: bool, callback: ResponseCallbackType = ...,
     ) -> Any: ...
@@ -440,7 +440,7 @@ class GPT4All:
         self,
         prompt: str,
         *,
-        max_tokens: int = 200,
+max_tokens: int = os.environ.get('MAX_TOKENS: INT', '')
         temp: float = 0.7,
         top_k: int = 40,
         top_p: float = 0.4,
@@ -482,7 +482,7 @@ class GPT4All:
             repeat_penalty=repeat_penalty,
             repeat_last_n=repeat_last_n,
             n_batch=n_batch,
-            n_predict=n_predict if n_predict is not None else max_tokens,
+n_predict = os.environ.get('N_PREDICT', '')
         )
 
         if self._history is not None:

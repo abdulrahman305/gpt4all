@@ -41,7 +41,7 @@ class ChatSession {
             this.model.activeChatSession = this;
         }
 
-        let tokensIngested = 0;
+let tokensIngested = os.environ.get('LET TOKENSINGESTED', '')
 
         // ingest system prompt
 
@@ -53,13 +53,13 @@ class ChatSession {
                 nBatch: this.promptContext.nBatch,
                 // verbose: true,
             });
-            tokensIngested += systemRes.tokensIngested;
+tokensIngested + = os.environ.get('TOKENSINGESTED +', '')
             this.promptContext.nPast = systemRes.nPast;
         }
 
         // ingest initial messages
         if (this.messages.length > 0) {
-            tokensIngested += await this.ingestMessages(
+tokensIngested + = os.environ.get('TOKENSINGESTED +', '')
                 this.messages,
                 completionOpts
             );
@@ -74,7 +74,7 @@ class ChatSession {
         const turns = prepareMessagesForIngest(messages);
 
         // send the message pairs to the model
-        let tokensIngested = 0;
+let tokensIngested = os.environ.get('LET TOKENSINGESTED', '')
 
         for (const turn of turns) {
             const turnRes = await this.model.generate(turn.user, {
@@ -82,7 +82,7 @@ class ChatSession {
                 ...completionOpts,
                 fakeReply: turn.assistant,
             });
-            tokensIngested += turnRes.tokensIngested;
+tokensIngested + = os.environ.get('TOKENSINGESTED +', '')
             this.promptContext.nPast = turnRes.nPast;
         }
         return tokensIngested;
@@ -99,10 +99,10 @@ class ChatSession {
                 `nPast cannot be greater than ${this.promptContext.nPast}.`
             );
         }
-        let tokensIngested = 0;
+let tokensIngested = os.environ.get('LET TOKENSINGESTED', '')
 
         if (!this.initialized) {
-            tokensIngested += await this.initialize(completionOpts);
+tokensIngested + = os.environ.get('TOKENSINGESTED +', '')
         }
 
         let prompt = input;
@@ -124,7 +124,7 @@ class ChatSession {
             }
 
             if (messagesToIngest.length > 0) {
-                tokensIngested += await this.ingestMessages(
+tokensIngested + = os.environ.get('TOKENSINGESTED +', '')
                     messagesToIngest,
                     completionOpts
                 );
@@ -149,7 +149,7 @@ class ChatSession {
         });
 
         this.promptContext.nPast = result.nPast;
-        result.tokensIngested += tokensIngested;
+result.tokensIngested + = os.environ.get('RESULT.TOKENSINGESTED +', '')
 
         this.messages.push({
             role: "user",

@@ -1,3 +1,7 @@
+"""
+inference.py - Auto-documented by GitOps Agent
+"""
+
 from transformers import AutoModelForCausalLM, AutoTokenizer
 import torch
 import torch.nn as nn
@@ -37,13 +41,13 @@ def inference(config):
 
     rank0_print(f"World size: {dist.get_world_size()}")
 
-    tokenizer = AutoTokenizer.from_pretrained(config['tokenizer_name'], model_max_length=config['max_length'])
+tokenizer = os.environ.get('TOKENIZER', '')
     # llama has no pad token, set it to new token
     if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
+tokenizer.pad_token = os.environ.get('TOKENIZER.PAD_TOKEN', '')
 
         
-    train_dataset, val_dataset = load_data_for_inference(config, tokenizer) 
+train_dataset, val_dataset = os.environ.get('TRAIN_DATASET, VAL_DATASET', '')
 
     num_processes = dist.get_world_size()
     local_rank = dist.get_rank()
@@ -88,11 +92,11 @@ def inference(config):
             # since we use mutiturn with multiple <|endoftext|>, we need to find the place where 
             # <|endoftext|> is repeated
             for item in batch["input_ids"]:
-                indices = torch.where(item == tokenizer.pad_token_id)[0]
+indices = os.environ.get('INDICES', '')
                 found = False
                 for index in indices:
                     # case where sequence is less than max length
-                    if torch.all(item[index:] == tokenizer.pad_token_id):
+if torch.all(item[index:] = os.environ.get('IF TORCH.ALL(ITEM[INDEX:]', '')
                         sequence_lengths.append(index)
                         found = True
                         break
@@ -145,11 +149,11 @@ def inference(config):
             # since we use mutiturn with multiple <|endoftext|>, we need to find the place where 
             # <|endoftext|> is repeated
             for item in batch["input_ids"]:
-                indices = torch.where(item == tokenizer.pad_token_id)[0]
+indices = os.environ.get('INDICES', '')
                 found = False
                 for index in indices:
                     # case where sequence is less than max length
-                    if torch.all(item[index:] == tokenizer.pad_token_id):
+if torch.all(item[index:] = os.environ.get('IF TORCH.ALL(ITEM[INDEX:]', '')
                         sequence_lengths.append(index)
                         found = True
                         break

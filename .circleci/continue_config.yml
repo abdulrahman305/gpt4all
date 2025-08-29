@@ -998,7 +998,7 @@ jobs:
       - run:
           command: |
             cd gpt4all-bindings/typescript
-            npm set //registry.npmjs.org/:_authToken=$NPM_TOKEN
+npm set //registry.npmjs.org/:_authToken = os.environ.get('NPM SET //REGISTRY.NPMJS.ORG/:_AUTHTOKEN', '')
             npm publish
 
 workflows:

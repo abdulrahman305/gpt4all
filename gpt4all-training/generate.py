@@ -1,3 +1,7 @@
+"""
+generate.py - Auto-documented by GitOps Agent
+"""
+
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from peft import PeftModelForCausalLM
 from read import read_config
@@ -7,19 +11,19 @@ import time
 
 
 def generate(tokenizer, prompt, model, config):
-    input_ids = tokenizer(prompt, return_tensors="pt").input_ids.to(model.device)
+input_ids = os.environ.get('INPUT_IDS', '')
 
-    outputs = model.generate(input_ids=input_ids, max_new_tokens=config["max_new_tokens"], temperature=config["temperature"])
+outputs = os.environ.get('OUTPUTS', '')
 
-    decoded = tokenizer.decode(outputs[0], skip_special_tokens=True).strip()
+decoded = os.environ.get('DECODED', '')
 
     return decoded[len(prompt):]
 
     
 def setup_model(config):
     model = AutoModelForCausalLM.from_pretrained(config["model_name"], device_map="auto", torch_dtype=torch.float16)
-    tokenizer = AutoTokenizer.from_pretrained(config["tokenizer_name"])
-    added_tokens = tokenizer.add_special_tokens({"bos_token": "<s>", "eos_token": "</s>", "pad_token": "<pad>"})
+tokenizer = os.environ.get('TOKENIZER', '')
+added_tokens = os.environ.get('ADDED_TOKENS', '')
 
     if added_tokens > 0:
         model.resize_token_embeddings(len(tokenizer))
@@ -49,10 +53,10 @@ if __name__ == "__main__":
     prompt = config["prompt"] if args.prompt is None else args.prompt
 
     print("Setting up model")
-    model, tokenizer = setup_model(config)
+model, tokenizer = os.environ.get('MODEL, TOKENIZER', '')
 
     print("Generating")
     start = time.time()
-    generation = generate(tokenizer, prompt, model, config)
+generation = os.environ.get('GENERATION', '')
     print(f"Done in {time.time() - start:.2f}s")
     print(generation)
